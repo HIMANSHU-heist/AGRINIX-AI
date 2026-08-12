@@ -358,24 +358,127 @@ with tabs[5]:
         st.markdown('</div>', unsafe_allow_html=True)
 
 # ---------------- TAB 7: FARMER ASSISTANT (DEMO CHAT) ----------------
+# ---------------- TAB 7: FARMER ASSISTANT (LIVE - GROQ, multilingual, reply-to) ----------------
 with tabs[6]:
-    st.markdown('#### AI Farmer Assistant <span class="agx-badge badge-demo">DEMO</span>', unsafe_allow_html=True)
-    st.caption("In production: RAG over verified agri-extension documents + LLM, in Marathi / Hindi / English.")
+    st.markdown('#### AI Farmer Assistant <span class="agx-badge badge-live">LIVE</span>', unsafe_allow_html=True)
+    st.caption("Powered by Groq (Llama 3.1) — Marathi, Hindi ani English madhe bolू शकता.")
 
-    if "chat" not in st.session_state:
-        st.session_state.chat = [
-            {"role":"assistant", "text":"Namaskar! Tumcha crop, disease, weather किंवा soil बद्दल काहीही विचारू शकता."}
-        ]
+    from groq import Groq
+    import uuid
 
+    try:
+        groq_key = st.secrets["GROQ_API_KEY"]
+        client = Groq(api_key=groq_key)
+        groq_ready = True
+    except Exception:
+        groq_ready = False
+        st.warning("GROQ_API_KEY sapडली nahi — .streamlit/secrets.toml madhe takar Streamlit Cloud settings madhe add kar.")
+
+    lang = st.radio(
+        "Language / भाषा",
+        ["मराठी (Marathi)", "हिंदी (Hindi)", "English"],
+        horizontal=True
+    )
+    lang_instruction = {
+        "मराठी (Marathi)": "फक्त मराठी भाषेत उत्तर दे. Devanagari script वापर.",
+        "हिंदी (Hindi)": "सिर्फ हिंदी भाषा में जवाब दो। Devanagari script इस्तेमाल करो।",
+        "English": "Reply only in plain English."
+    }[lang]
+    greetings = {
+        "मराठी (Marathi)": "नमस्कार! तुमच्या पीक, रोग, हवामान किंवा माती याबद्दल काहीही विचारा.",
+        "हिंदी (Hindi)": "नमस्ते! अपनी फसल, बीमारी, मौसम या मिट्टी के बारे में कुछ भी पूछें।",
+        "English": "Hello! Ask me anything about your crop, disease, weather or soil."
+    }
+
+    if "chat" not in st.session_state or st.session_state.get("chat_lang") != lang:
+        st.session_state.chat = [{"id": str(uuid.uuid4()), "role":"assistant", "text": greetings[lang], "reply_to": None}]
+        st.session_state.chat_lang = lang
+    if "replying_to" not in st.session_state:
+        st.session_state.replying_to = None
+
+    def find_msg(msg_id):
+        for m in st.session_state.chat:
+            if m["id"] == msg_id:
+                return m
+        return None
+
+    def snippet(text, n=60):
+        return text if len(text) <= n else text[:n] + "..."
+
+    # ---- Render chat history ----
     for msg in st.session_state.chat:
         with st.chat_message(msg["role"]):
+            if msg.get("reply_to"):
+                original = find_msg(msg["reply_to"])
+                if original:
+                    st.markdown(
+                        f"""<div style="border-left:3px solid #A5D6A7; background:#F1F8F2;
+                        padding:6px 10px; border-radius:6px; font-size:12.5px; color:#557a5c; margin-bottom:6px;">
+                        ↪ {'You' if original['role']=='user' else 'Assistant'}: {snippet(original['text'])}
+                        </div>""",
+                        unsafe_allow_html=True
+                    )
             st.write(msg["text"])
+            if st.button("↩ Reply", key=f"reply_{msg['id']}"):
+                st.session_state.replying_to = msg["id"]
+                st.rerun()
 
-    user_q = st.chat_input("Tumcha प्रश्न लिहा... (उदा. Cotton leaves yellow का होतायत?)")
-    if user_q:
-        st.session_state.chat.append({"role":"user","text":user_q})
-        canned = "Ha ek demo response ahe. Production madhe he uttar RAG retrieval + verified agri knowledge base + LLM वापरून generate होईल, tuझ्या farm profile ani current weather/soil data नुसार personalized."
-        st.session_state.chat.append({"role":"assistant","text":canned})
+    # ---- Reply preview above input ----
+    if st.session_state.replying_to:
+        original = find_msg(st.session_state.replying_to)
+        if original:
+            rc1, rc2 = st.columns([10,1])
+            with rc1:
+                st.markdown(
+                    f"""<div style="border-left:3px solid #66BB6A; background:#E8F5E9;
+                    padding:8px 12px; border-radius:6px; font-size:13px; color:#2E5D34;">
+                    Replying to: {snippet(original['text'], 80)}
+                    </div>""",
+                    unsafe_allow_html=True
+                )
+            with rc2:
+                if st.button("✕", key="cancel_reply"):
+                    st.session_state.replying_to = None
+                    st.rerun()
+
+    placeholder_text = {
+        "मराठी (Marathi)": "तुमचा प्रश्न इथे लिहा...",
+        "हिंदी (Hindi)": "अपना सवाल यहाँ लिखें...",
+        "English": "Type your question..."
+    }[lang]
+
+    user_q = st.chat_input(placeholder_text)
+    if user_q and groq_ready:
+        reply_ref = st.session_state.replying_to
+        user_msg = {"id": str(uuid.uuid4()), "role":"user", "text": user_q, "reply_to": reply_ref}
+        st.session_state.chat.append(user_msg)
+        st.session_state.replying_to = None
+
+        # build context — include the replied-to message explicitly if present
+        context_note = ""
+        if reply_ref:
+            original = find_msg(reply_ref)
+            if original:
+                context_note = f"\n\n(Farmer is specifically replying to this earlier message: \"{original['text']}\")"
+
+        system_prompt = f"""Tu AGRINEX AI cha farming assistant ahes. Farmer profile:
+Name: {farmer_name}, Location: {location}, Land: {land_area} acres.
+
+{lang_instruction}
+
+Farming, crops, disease, soil, weather, market price संबंधित प्रश्नांना उत्तर दे — short, practical, farmer-friendly. Farming shivay dusrya topic var answer dyaycha nahi, politely redirect kar.{context_note}"""
+
+        history = [{"role":m["role"],"content":m["text"]} for m in st.session_state.chat[-6:]]
+
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role":"system","content":system_prompt}, *history],
+            temperature=0.6,
+            max_tokens=500
+        )
+        answer = response.choices[0].message.content
+        assistant_msg = {"id": str(uuid.uuid4()), "role":"assistant", "text": answer, "reply_to": None}
+        st.session_state.chat.append(assistant_msg)
         st.rerun()
 
 # ---------------- TAB 8: MARKETPLACE (DEMO) ----------------

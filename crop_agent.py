@@ -54,7 +54,7 @@ class CropAdvisorAgent:
     → final farmer-facing recommendation.
     """
 
-    def __init__(self, groq_client, kb_path="crop_calendar_kb.json", model_name="llama-3.1-8b-instant"):
+    def __init__(self, groq_client, kb_path="crop_calendar_kb.json", model_name="openai/gpt-oss-20b"):
         self.client = groq_client
         self.rag = CropCalendarRAG(kb_path)
         self.model_name = model_name

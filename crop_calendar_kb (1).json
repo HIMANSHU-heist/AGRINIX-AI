@@ -1,0 +1,98 @@
+[
+  {
+    "id": "mh_kharif",
+    "state": "Maharashtra",
+    "season": "Kharif",
+    "text": "Maharashtra Kharif season (June-October, monsoon-sown): common crops are rice (Konkan, Vidarbha), cotton (Vidarbha, Marathwada), soybean (Vidarbha, Marathwada), jowar, bajra, maize, tur (pigeonpeas), groundnut, and sugarcane (year-round in irrigated belts like Kolhapur, Nashik, Pune)."
+  },
+  {
+    "id": "mh_rabi",
+    "state": "Maharashtra",
+    "season": "Rabi",
+    "text": "Maharashtra Rabi season (October-March, winter-sown, less rainfall, relies on residual moisture/irrigation): common crops are wheat, jowar (rabi jowar), gram/chickpea, sunflower, onion, and mustard in some belts. Onion is a major Rabi cash crop around Nashik."
+  },
+  {
+    "id": "mh_zaid",
+    "state": "Maharashtra",
+    "season": "Zaid/Summer",
+    "text": "Maharashtra summer/Zaid season (March-June, needs irrigation): watermelon, muskmelon, summer groundnut, and vegetables like tomato are common where irrigation is available."
+  },
+  {
+    "id": "nashik_specific",
+    "state": "Maharashtra",
+    "season": "All",
+    "text": "Nashik district is well known for onion (largest onion market in India, Lasalgaon), grapes (especially for export/wine), tomato, and sugarcane in irrigated tracts. It has a moderate climate suited to horticulture crops."
+  },
+  {
+    "id": "punjab_kharif",
+    "state": "Punjab",
+    "season": "Kharif",
+    "text": "Punjab Kharif season: rice (basmati and non-basmati) and cotton are dominant, along with maize and sugarcane."
+  },
+  {
+    "id": "punjab_rabi",
+    "state": "Punjab",
+    "season": "Rabi",
+    "text": "Punjab Rabi season: wheat is the dominant crop, along with mustard and some gram."
+  },
+  {
+    "id": "up_kharif",
+    "state": "Uttar Pradesh",
+    "season": "Kharif",
+    "text": "Uttar Pradesh Kharif season: rice, sugarcane (grown almost year-round), maize, bajra, and pulses like arhar/tur are common."
+  },
+  {
+    "id": "up_rabi",
+    "state": "Uttar Pradesh",
+    "season": "Rabi",
+    "text": "Uttar Pradesh Rabi season: wheat is the dominant crop, along with mustard, gram, and lentil."
+  },
+  {
+    "id": "gujarat_kharif",
+    "state": "Gujarat",
+    "season": "Kharif",
+    "text": "Gujarat Kharif season: cotton, groundnut, bajra, and sugarcane in irrigated southern belts."
+  },
+  {
+    "id": "gujarat_rabi",
+    "state": "Gujarat",
+    "season": "Rabi",
+    "text": "Gujarat Rabi season: wheat, mustard, and gram are common, with cumin in drier regions."
+  },
+  {
+    "id": "karnataka_general",
+    "state": "Karnataka",
+    "season": "All",
+    "text": "Karnataka grows ragi, jowar, maize, cotton, sugarcane, coffee (Coorg/Chikmagalur hill regions), and a wide range of fruits like mango, banana, pomegranate, and grapes depending on the agro-climatic zone."
+  },
+  {
+    "id": "andhra_telangana_general",
+    "state": "Andhra Pradesh/Telangana",
+    "season": "All",
+    "text": "Andhra Pradesh and Telangana grow rice extensively in irrigated deltas, along with cotton, maize, groundnut, chillies, mango, and sugarcane."
+  },
+  {
+    "id": "tamilnadu_general",
+    "state": "Tamil Nadu",
+    "season": "All",
+    "text": "Tamil Nadu grows rice, sugarcane, cotton, groundnut, and coconut extensively, along with banana and coffee in hill districts like the Nilgiris."
+  },
+  {
+    "id": "mp_general",
+    "state": "Madhya Pradesh",
+    "season": "All",
+    "text": "Madhya Pradesh is a major soybean and wheat producing state, also grows gram, cotton, and sugarcane."
+  },
+  {
+    "id": "rajasthan_general",
+    "state": "Rajasthan",
+    "season": "All",
+    "text": "Rajasthan, being arid/semi-arid, grows drought-tolerant crops: bajra, jowar, mustard, gram, and groundnut, with wheat in irrigated canal-command areas."
+  },
+  {
+    "id": "wb_general",
+    "state": "West Bengal",
+    "season": "All",
+    "text": "West Bengal is a major rice and jute producing state, also grows potato, and vegetables extensively."
+  }
+]

@@ -519,7 +519,7 @@ Farming, crops, disease, soil, weather, market price संबंधित प�
         history = [{"role":m["role"],"content":m["text"]} for m in st.session_state.chat[-6:]]
 
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             messages=[{"role":"system","content":system_prompt}, *history],
             temperature=0.6,
             max_tokens=500

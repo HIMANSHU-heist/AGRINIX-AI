@@ -80,6 +80,33 @@ if os.path.exists(MODEL_PATH) and os.path.exists(LABELS_PATH):
     except Exception as e:
         st.sidebar.warning(f"Model file found but couldn't load: {e}")
 
+# ============================================================
+# GROQ CLIENT (shared) — used by Tab 1 crop-agent explanation
+# and Tab 7 farmer assistant chat
+# ============================================================
+from groq import Groq
+
+groq_client = None
+groq_ready = False
+try:
+    groq_key = st.secrets["GROQ_API_KEY"]
+    groq_client = Groq(api_key=groq_key)
+    groq_ready = True
+except Exception:
+    groq_ready = False
+
+# ============================================================
+# CROP ADVISOR AGENT (ML + RAG + LLM) — cached so the TF-IDF
+# index over crop_calendar_kb.json isn't rebuilt on every rerun
+# ============================================================
+from crop_agent import CropAdvisorAgent
+
+@st.cache_resource
+def get_crop_agent(_client):
+    return CropAdvisorAgent(_client, kb_path="crop_calendar_kb.json")
+
+crop_agent = get_crop_agent(groq_client) if groq_ready else None
+
 CROP_ICONS = {
     "rice":"🌾","maize":"🌽","chickpea":"🫘","kidneybeans":"🫘","pigeonpeas":"🫛",
     "mothbeans":"🫘","mungbean":"🫘","blackgram":"🫘","lentil":"🫛","pomegranate":"🍎",
@@ -175,6 +202,7 @@ with tabs[0]:
         hum = st.slider("Humidity (%)", 0.0, 100.0, 82.0)
         ph = st.slider("Soil pH", 0.0, 14.0, 6.5)
         rain = st.slider("Rainfall (mm)", 0.0, 300.0, 202.9)
+        season = st.selectbox("Season", ["Kharif", "Rabi", "Zaid/Summer"])
         run = st.button("🔍 Recommend Crop", use_container_width=True, type="primary")
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -205,6 +233,31 @@ with tabs[0]:
             for c, s in top3:
                 st.write(f"{CROP_ICONS.get(c,'🌱')} **{c}** — {s:.1f}%")
                 st.progress(min(1.0, s/100))
+
+            st.write("")
+            st.markdown("**🤖 AI Agent's take** <span class=\"agx-badge badge-live\">AGENT + RAG</span>", unsafe_allow_html=True)
+            if crop_agent is not None:
+                with st.spinner("Agent reasoning over ML result + regional crop calendar..."):
+                    try:
+                        result = crop_agent.recommend(
+                            ml_top3=top3,
+                            inputs={"N": n, "P": p, "K": k, "temperature": temp,
+                                    "humidity": hum, "ph": ph, "rainfall": rain},
+                            location=location,
+                            season=season,
+                        )
+                        st.info(result["explanation"])
+                        with st.expander("📚 Regional knowledge the agent used"):
+                            if result["retrieved_context"]:
+                                for r in result["retrieved_context"]:
+                                    st.caption(f"**{r['state']} — {r['season']}** (match score {r['score']:.2f})")
+                                    st.write(r["text"])
+                            else:
+                                st.caption("No specific regional match found for this location/season.")
+                    except Exception as e:
+                        st.warning(f"Agent explanation unavailable right now: {e}")
+            else:
+                st.caption("Add GROQ_API_KEY to .streamlit/secrets.toml (or Streamlit Cloud settings) to enable the AI agent's explanation here.")
         else:
             st.info("Sliders adjust kar and click **Recommend Crop**.")
 
@@ -363,15 +416,10 @@ with tabs[6]:
     st.markdown('#### AI Farmer Assistant <span class="agx-badge badge-live">LIVE</span>', unsafe_allow_html=True)
     st.caption("Powered by Groq (Llama 3.1) — Marathi, Hindi ani English madhe bolू शकता.")
 
-    from groq import Groq
     import uuid
 
-    try:
-        groq_key = st.secrets["GROQ_API_KEY"]
-        client = Groq(api_key=groq_key)
-        groq_ready = True
-    except Exception:
-        groq_ready = False
+    client = groq_client  # shared client set up once near the top of the file
+    if not groq_ready:
         st.warning("GROQ_API_KEY sapडली nahi — .streamlit/secrets.toml madhe takar Streamlit Cloud settings madhe add kar.")
 
     lang = st.radio(

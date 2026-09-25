@@ -403,7 +403,7 @@ with tabs[2]:
 with tabs[3]:
     badge = '<span class="agx-badge badge-live">LIVE DATA</span>' if data_gov_key else '<span class="agx-badge badge-demo">DEMO MODE</span>'
     st.markdown(f"#### Market Price Forecast {badge}", unsafe_allow_html=True)
-    st.caption("Real mandi price data from data.gov.in (Agmarknet) — all India, all commodities.")
+    st.caption("Real mandi price data from data.gov.in (Agmarknet) — all India, all commodities. This dataset is a daily snapshot of today's arrivals, so it shows current spread across markets rather than a multi-day trend.")
 
     if not data_gov_key:
         st.warning("DATA_GOV_API_KEY sapडली nahi — .streamlit/secrets.toml madhe takar Streamlit Cloud settings madhe add kar.")
@@ -427,30 +427,26 @@ with tabs[3]:
                 df = fetch_mandi_prices(data_gov_key, pr_crop, state=state_filter, limit=200)
 
             if df.empty or "modal_price" not in df.columns:
-                st.error("No data found for this crop/state combination. Try a different one.")
+                st.error(f"No mandi arrivals found for '{pr_crop}' today in this selection. Try 'All India', or a related crop name (e.g. try just 'Onion' instead of a specific variety).")
             else:
                 df = df.dropna(subset=["modal_price"])
-                st.line_chart(df.set_index("arrival_date")["modal_price"])
+                by_market = df.groupby("market", as_index=False)["modal_price"].mean().sort_values("modal_price")
+                st.bar_chart(by_market.set_index("market")["modal_price"])
 
-                latest = df.iloc[-1]
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Latest modal price", f"₹{latest['modal_price']:,.0f}/quintal")
+                c1.metric("Avg modal price", f"₹{df['modal_price'].mean():,.0f}/quintal")
                 if "min_price" in df.columns:
-                    c2.metric("Min price (recent)", f"₹{df['min_price'].min():,.0f}/quintal")
+                    c2.metric("Lowest reported", f"₹{df['min_price'].min():,.0f}/quintal")
                 if "max_price" in df.columns:
-                    c3.metric("Max price (recent)", f"₹{df['max_price'].max():,.0f}/quintal")
+                    c3.metric("Highest reported", f"₹{df['max_price'].max():,.0f}/quintal")
 
-                if len(df) >= 5:
-                    recent_avg = df["modal_price"].tail(5).mean()
-                    older_avg = df["modal_price"].head(5).mean()
-                    trend = "rising 📈" if recent_avg > older_avg else "falling 📉" if recent_avg < older_avg else "stable ➡️"
-                    st.info(f"Recent trend for {pr_crop}: **{trend}** (based on last {len(df)} reported prices).")
+                st.info(f"**{pr_crop}** — {len(df)} market report(s) found across {df['state'].nunique() if 'state' in df.columns else '?'} state(s) today.")
 
                 with st.expander("Raw mandi records"):
                     show_cols = [c for c in ["arrival_date","state","district","market","commodity","variety","min_price","max_price","modal_price"] if c in df.columns]
                     st.dataframe(df[show_cols], use_container_width=True)
 
-                st.caption("Source: data.gov.in (Agmarknet). Trend is directional, not a guaranteed future price.")
+                st.caption("Source: data.gov.in (Agmarknet), daily arrivals snapshot. Not a guaranteed future price.")
 
 # ---------------- TAB 5: WEATHER INTELLIGENCE (DEMO) ----------------
 with tabs[4]:

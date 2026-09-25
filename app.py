@@ -414,7 +414,10 @@ with tabs[3]:
         state_filter = None if selected_state == "All India" else selected_state
 
         with st.spinner("Loading crop list for this state..."):
-            commodities = fetch_commodities(data_gov_key, state=state_filter)
+            commodities, commodities_debug = fetch_commodities(data_gov_key, state=state_filter)
+
+        with st.expander("🔧 Debug info (temporary)"):
+            st.json(commodities_debug)
 
         with pc2:
             if commodities:
@@ -424,7 +427,10 @@ with tabs[3]:
 
         if st.button("📊 Get Price Data", type="primary"):
             with st.spinner(f"Fetching mandi prices for {pr_crop}..."):
-                df = fetch_mandi_prices(data_gov_key, pr_crop, state=state_filter, limit=200)
+                df, price_debug = fetch_mandi_prices(data_gov_key, pr_crop, state=state_filter, limit=500)
+
+            with st.expander("🔧 Debug info (temporary)"):
+                st.json(price_debug)
 
             if df.empty or "modal_price" not in df.columns:
                 st.error(f"No mandi arrivals found for '{pr_crop}' today in this selection. Try 'All India', or a related crop name (e.g. try just 'Onion' instead of a specific variety).")

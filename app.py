@@ -413,8 +413,23 @@ with tabs[3]:
             selected_state = st.selectbox("State", ["All India"] + INDIAN_STATES, key="price_state")
         state_filter = None if selected_state == "All India" else selected_state
 
+        # ---- Retry control: lets the farmer force a fresh attempt without
+        # a full page reload if the upstream API timed out or was slow. ----
+        retry_col1, retry_col2 = st.columns([5, 1])
+        with retry_col2:
+            if st.button("🔄 Retry", key="retry_commodities", help="Force a fresh fetch (bypasses the cache)"):
+                fetch_commodities.clear()
+                st.rerun()
+
         with st.spinner("Loading crop list for this state..."):
             commodities, commodities_debug = fetch_commodities(data_gov_key, state=state_filter)
+
+        # Distinguish "API timed out" from "no data" so the farmer isn't
+        # shown a misleading message when the real cause is an upstream stall.
+        if not commodities_debug.get("ok") and commodities_debug.get("timeout"):
+            st.warning("The mandi price API is responding slowly right now. Try the 🔄 Retry button above in a moment.")
+        elif not commodities_debug.get("ok"):
+            st.warning("Couldn't load the crop list from the mandi price API right now. You can still type a crop name manually below.")
 
         with st.expander("🔧 Debug info (temporary)"):
             st.json(commodities_debug)
@@ -433,7 +448,12 @@ with tabs[3]:
                 st.json(price_debug)
 
             if df.empty or "modal_price" not in df.columns:
-                st.error(f"No mandi arrivals found for '{pr_crop}' today in this selection. Try 'All India', or a related crop name (e.g. try just 'Onion' instead of a specific variety).")
+                if not price_debug.get("ok") and price_debug.get("timeout"):
+                    st.error(f"The mandi price API timed out fetching data for '{pr_crop}'. Try again in a moment — the 🔄 Retry button above also clears the cached crop list if that's stuck too.")
+                elif not price_debug.get("ok"):
+                    st.error(f"Couldn't reach the mandi price API right now while fetching '{pr_crop}'. Try again shortly.")
+                else:
+                    st.error(f"No mandi arrivals found for '{pr_crop}' today in this selection. Try 'All India', or a related crop name (e.g. try just 'Onion' instead of a specific variety).")
             else:
                 df = df.dropna(subset=["modal_price"])
                 by_market = df.groupby("market", as_index=False)["modal_price"].mean().sort_values("modal_price")

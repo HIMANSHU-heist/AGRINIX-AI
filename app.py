@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta
 import cv2
 from PIL import Image
+from mandi_data import INDIAN_STATES, fetch_commodities, fetch_mandi_prices
 
 DISEASE_MODEL_PATHS = ["disease_model.keras", os.path.join("model_output", "disease_model.h5")]
 DISEASE_LABELS_PATHS = ["disease_labels.json", os.path.join("model_output", "disease_labels.json")]
@@ -139,6 +140,8 @@ try:
     groq_ready = True
 except Exception:
     groq_ready = False
+
+data_gov_key = st.secrets.get("DATA_GOV_API_KEY", None)
 
 # ============================================================
 # CROP ADVISOR AGENT (ML + RAG + LLM) — cached so the TF-IDF
@@ -396,32 +399,58 @@ with tabs[2]:
         m4.metric("Potential profit", f"₹{profit:,.0f}", delta=f"{(profit/cost*100 if cost else 0):.1f}% margin")
         st.caption("Estimates only — actual results depend on weather, pests and market conditions.")
 
-# ---------------- TAB 4: PRICE FORECAST (DEMO) ----------------
+# ---------------- TAB 4: PRICE FORECAST (LIVE - Agmarknet, all India) ----------------
 with tabs[3]:
-    st.markdown('#### Market Price Forecast <span class="agx-badge badge-demo">DEMO</span>', unsafe_allow_html=True)
-    st.caption("Historical mandi price trend + short-term forecast with uncertainty band.")
-    pr_crop = st.selectbox("Select crop", list(CROP_ICONS.keys()), key="price_crop")
+    badge = '<span class="agx-badge badge-live">LIVE DATA</span>' if data_gov_key else '<span class="agx-badge badge-demo">DEMO MODE</span>'
+    st.markdown(f"#### Market Price Forecast {badge}", unsafe_allow_html=True)
+    st.caption("Real mandi price data from data.gov.in (Agmarknet) — all India, all commodities.")
 
-    rng = np.random.default_rng(abs(hash(pr_crop)) % 1000)
-    base = 1800 + (abs(hash(pr_crop)) % 1500)
-    days = pd.date_range(end=datetime.today(), periods=30)
-    hist = base + np.cumsum(rng.normal(0, 25, 30))
-    future_days = pd.date_range(start=datetime.today()+timedelta(days=1), periods=10)
-    forecast = hist[-1] + np.cumsum(rng.normal(2, 20, 10))
-    upper = forecast + np.linspace(20, 120, 10)
-    lower = forecast - np.linspace(20, 120, 10)
+    if not data_gov_key:
+        st.warning("DATA_GOV_API_KEY sapडली nahi — .streamlit/secrets.toml madhe takar Streamlit Cloud settings madhe add kar.")
+    else:
+        pc1, pc2 = st.columns(2)
+        with pc1:
+            selected_state = st.selectbox("State", ["All India"] + INDIAN_STATES, key="price_state")
+        state_filter = None if selected_state == "All India" else selected_state
 
-    df = pd.DataFrame({
-        "date": list(days) + list(future_days),
-        "price": list(hist) + list(forecast),
-        "type": ["Historical"]*30 + ["Forecast"]*10
-    })
-    st.line_chart(df.set_index("date")["price"])
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Current modal price", f"₹{hist[-1]:,.0f}/quintal")
-    c2.metric("10-day forecast", f"₹{forecast[-1]:,.0f}/quintal", delta=f"{forecast[-1]-hist[-1]:+.0f}")
-    c3.metric("Forecast range", f"₹{lower[-1]:,.0f} – ₹{upper[-1]:,.0f}")
-    st.caption("Shown as a range with uncertainty — never a guaranteed future price.")
+        with st.spinner("Loading crop list for this state..."):
+            commodities = fetch_commodities(data_gov_key, state=state_filter)
+
+        with pc2:
+            if commodities:
+                pr_crop = st.selectbox("Crop / Commodity", commodities, key="price_crop")
+            else:
+                pr_crop = st.text_input("Crop / Commodity (type exact name)", "Tomato", key="price_crop_text")
+
+        if st.button("📊 Get Price Data", type="primary"):
+            with st.spinner(f"Fetching mandi prices for {pr_crop}..."):
+                df = fetch_mandi_prices(data_gov_key, pr_crop, state=state_filter, limit=200)
+
+            if df.empty or "modal_price" not in df.columns:
+                st.error("No data found for this crop/state combination. Try a different one.")
+            else:
+                df = df.dropna(subset=["modal_price"])
+                st.line_chart(df.set_index("arrival_date")["modal_price"])
+
+                latest = df.iloc[-1]
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Latest modal price", f"₹{latest['modal_price']:,.0f}/quintal")
+                if "min_price" in df.columns:
+                    c2.metric("Min price (recent)", f"₹{df['min_price'].min():,.0f}/quintal")
+                if "max_price" in df.columns:
+                    c3.metric("Max price (recent)", f"₹{df['max_price'].max():,.0f}/quintal")
+
+                if len(df) >= 5:
+                    recent_avg = df["modal_price"].tail(5).mean()
+                    older_avg = df["modal_price"].head(5).mean()
+                    trend = "rising 📈" if recent_avg > older_avg else "falling 📉" if recent_avg < older_avg else "stable ➡️"
+                    st.info(f"Recent trend for {pr_crop}: **{trend}** (based on last {len(df)} reported prices).")
+
+                with st.expander("Raw mandi records"):
+                    show_cols = [c for c in ["arrival_date","state","district","market","commodity","variety","min_price","max_price","modal_price"] if c in df.columns]
+                    st.dataframe(df[show_cols], use_container_width=True)
+
+                st.caption("Source: data.gov.in (Agmarknet). Trend is directional, not a guaranteed future price.")
 
 # ---------------- TAB 5: WEATHER INTELLIGENCE (DEMO) ----------------
 with tabs[4]:
@@ -630,4 +659,4 @@ with tabs[7]:
 
 st.write("")
 st.divider()
-st.caption("AGRINEX AI — prototype. Crop Recommendation & Disease Detection tabs use real trained models when their files are present in this folder; other tabs are illustrative UI for the full planned system.")
+st.caption("AGRINEX AI — prototype. Crop Recommendation, Disease Detection & Price Forecast tabs use real live data/models when their files/keys are present; other tabs are illustrative UI for the full planned system.")

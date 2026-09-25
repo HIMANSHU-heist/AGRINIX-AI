@@ -1,0 +1,42 @@
+[
+  {
+    "id": "q1",
+    "location": "Nashik, Maharashtra",
+    "season": "Kharif",
+    "inputs": {"N": 90, "P": 42, "K": 43, "temperature": 20.8, "humidity": 82, "ph": 6.5, "rainfall": 202.9},
+    "ml_top3": [["rice", 78.4], ["maize", 12.1], ["cotton", 5.3]],
+    "expected_keywords": ["rice", "kharif", "rainfall", "humidity"]
+  },
+  {
+    "id": "q2",
+    "location": "Pune, Maharashtra",
+    "season": "Rabi",
+    "inputs": {"N": 40, "P": 60, "K": 80, "temperature": 22, "humidity": 55, "ph": 6.8, "rainfall": 45},
+    "ml_top3": [["chickpea", 71.2], ["lentil", 15.4], ["maize", 9.1]],
+    "expected_keywords": ["chickpea", "rabi", "pH", "temperature"]
+  },
+  {
+    "id": "q3",
+    "location": "Ludhiana, Punjab",
+    "season": "Kharif",
+    "inputs": {"N": 100, "P": 45, "K": 20, "temperature": 26, "humidity": 70, "ph": 6.2, "rainfall": 90},
+    "ml_top3": [["maize", 68.5], ["cotton", 20.2], ["rice", 8.9]],
+    "expected_keywords": ["maize", "cotton", "punjab", "kharif"]
+  },
+  {
+    "id": "q4",
+    "location": "Kochi, Kerala",
+    "season": "Zaid/Summer",
+    "inputs": {"N": 20, "P": 20, "K": 30, "temperature": 28, "humidity": 92, "ph": 5.8, "rainfall": 180},
+    "ml_top3": [["coconut", 82.0], ["banana", 11.0], ["papaya", 5.0]],
+    "expected_keywords": ["coconut", "kerala", "humidity", "rainfall"]
+  },
+  {
+    "id": "q5",
+    "location": "Nagpur, Maharashtra",
+    "season": "Kharif",
+    "inputs": {"N": 120, "P": 40, "K": 20, "temperature": 24, "humidity": 78, "ph": 6.9, "rainfall": 85},
+    "ml_top3": [["cotton", 74.3], ["maize", 18.0], ["pigeonpeas", 6.2]],
+    "expected_keywords": ["cotton", "nagpur", "kharif", "soil"]
+  }
+]

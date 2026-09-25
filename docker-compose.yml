@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+  agrinex-app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+    env_file:
+      - .streamlit/secrets.env   # GROQ_API_KEY, DATA_GOV_API_KEY here, not committed
+    depends_on:
+      - redis
+      - chromadb
+    volumes:
+      - ./disease_model.h5:/app/disease_model.h5:ro
+      - ./crop_model.pkl:/app/crop_model.pkl:ro
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma-data:/chroma/chroma
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  chroma-data:

@@ -1,0 +1,64 @@
+name: RAG Evaluation
+
+on:
+  pull_request:
+    paths:
+      - "crop_agent.py"
+      - "agents/**"
+      - "crop_calendar_kb.json"
+      - "eval/**"
+
+jobs:
+  rag-eval:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run RAG evaluation against golden dataset
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY_TEST }}
+        run: |
+          python eval/run_rag_eval.py --report eval/eval_report.json --fail-below 0.65
+
+      - name: Upload eval report
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-eval-report
+          path: eval/eval_report.json
+
+      - name: Comment summary on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let summary = "RAG eval report not found.";
+            try {
+              const data = JSON.parse(fs.readFileSync('eval/eval_report.json', 'utf8'));
+              summary = `**RAG Evaluation Results**\n\n` +
+                `- Avg faithfulness: ${data.avg_faithfulness.toFixed(2)}\n` +
+                `- Avg answer relevancy: ${data.avg_relevancy.toFixed(2)}\n` +
+                `- Avg context precision: ${data.avg_context_precision.toFixed(2)}\n` +
+                `- Questions evaluated: ${data.total_questions}\n` +
+                `- Pass rate: ${(data.pass_rate * 100).toFixed(1)}%`;
+            } catch (e) {}
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });

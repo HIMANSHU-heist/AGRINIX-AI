@@ -6,7 +6,10 @@ import os
 from datetime import datetime, timedelta
 import cv2
 from PIL import Image
-from mandi_data import INDIAN_STATES, fetch_commodities, fetch_mandi_prices
+from mandi_data import (
+    INDIAN_STATES, fetch_state_snapshot, summarize_by_commodity,
+    log_daily_snapshot, get_commodity_history, naive_forecast,
+)
 
 DISEASE_MODEL_PATHS = ["disease_model.keras", os.path.join("model_output", "disease_model.h5")]
 DISEASE_LABELS_PATHS = ["disease_labels.json", os.path.join("model_output", "disease_labels.json")]
@@ -399,80 +402,124 @@ with tabs[2]:
         m4.metric("Potential profit", f"₹{profit:,.0f}", delta=f"{(profit/cost*100 if cost else 0):.1f}% margin")
         st.caption("Estimates only — actual results depend on weather, pests and market conditions.")
 
-# ---------------- TAB 4: PRICE FORECAST (LIVE - Agmarknet, all India) ----------------
+# ---------------- TAB 4: PRICE FORECAST — live state-wide market board ----------------
 with tabs[3]:
     badge = '<span class="agx-badge badge-live">LIVE DATA</span>' if data_gov_key else '<span class="agx-badge badge-demo">DEMO MODE</span>'
-    st.markdown(f"#### Market Price Forecast {badge}", unsafe_allow_html=True)
-    st.caption("Real mandi price data from data.gov.in (Agmarknet) — all India, all commodities. This dataset is a daily snapshot of today's arrivals, so it shows current spread across markets rather than a multi-day trend.")
+    st.markdown(f"#### Market Price Board {badge}", unsafe_allow_html=True)
+    st.caption("Pick a state to see every crop's live mandi price at once — tap any crop below to open its own chart.")
 
     if not data_gov_key:
         st.warning("DATA_GOV_API_KEY sapडली nahi — .streamlit/secrets.toml madhe takar Streamlit Cloud settings madhe add kar.")
     else:
-        pc1, pc2 = st.columns(2)
-        with pc1:
-            selected_state = st.selectbox("State", ["All India"] + INDIAN_STATES, key="price_state")
+        selected_state = st.selectbox("State", ["All India"] + INDIAN_STATES, key="price_state")
         state_filter = None if selected_state == "All India" else selected_state
 
-        # ---- Retry control: lets the farmer force a fresh attempt without
-        # a full page reload if the upstream API timed out or was slow. ----
-        retry_col1, retry_col2 = st.columns([5, 1])
-        with retry_col2:
-            if st.button("🔄 Retry", key="retry_commodities", help="Force a fresh fetch (bypasses the cache)"):
-                fetch_commodities.clear()
-                st.rerun()
+        # Reset the drilldown selection whenever the state changes
+        if st.session_state.get("_price_state_prev") != selected_state:
+            st.session_state["_price_state_prev"] = selected_state
+            st.session_state["_selected_commodity"] = None
 
-        with st.spinner("Loading crop list for this state..."):
-            commodities, commodities_debug = fetch_commodities(data_gov_key, state=state_filter)
+        with st.spinner(f"Loading live prices for {selected_state}..."):
+            raw_df, ok = fetch_state_snapshot(data_gov_key, state=state_filter)
 
-        # Distinguish "API timed out" from "no data" so the farmer isn't
-        # shown a misleading message when the real cause is an upstream stall.
-        if not commodities_debug.get("ok") and commodities_debug.get("timeout"):
-            st.warning("The mandi price API is responding slowly right now. Try the 🔄 Retry button above in a moment.")
-        elif not commodities_debug.get("ok"):
-            st.warning("Couldn't load the crop list from the mandi price API right now. You can still type a crop name manually below.")
+        board = summarize_by_commodity(raw_df)
 
-        with st.expander("🔧 Debug info (temporary)"):
-            st.json(commodities_debug)
-
-        with pc2:
-            if commodities:
-                pr_crop = st.selectbox("Crop / Commodity", commodities, key="price_crop")
+        # Quiet fallback: if the live call failed but we have a board from
+        # a previous successful load this session, keep showing that one
+        # instead of an empty/error screen.
+        if not ok or board.empty:
+            cached = st.session_state.get(f"_board_cache_{selected_state}")
+            if cached is not None and not cached.empty:
+                board = cached
+                st.caption("🟡 Live refresh is slow right now — showing the last loaded prices for this state.")
             else:
-                pr_crop = st.text_input("Crop / Commodity (type exact name)", "Tomato", key="price_crop_text")
+                st.info(f"No live price data available for {selected_state} right now. Try again in a moment, or pick 'All India'.")
+        else:
+            st.session_state[f"_board_cache_{selected_state}"] = board
+            log_daily_snapshot(selected_state, board)  # builds real history over days of use
 
-        if st.button("📊 Get Price Data", type="primary"):
-            with st.spinner(f"Fetching mandi prices for {pr_crop}..."):
-                df, price_debug = fetch_mandi_prices(data_gov_key, pr_crop, state=state_filter, limit=500)
+        if not board.empty:
+            icon_of = lambda name: CROP_ICONS.get(name.strip().lower(), "🌱")
 
-            with st.expander("🔧 Debug info (temporary)"):
-                st.json(price_debug)
+            st.write("")
+            st.caption(f"🟢 {len(board)} crops trading in {selected_state} today · tap a row to open its chart")
 
-            if df.empty or "modal_price" not in df.columns:
-                if not price_debug.get("ok") and price_debug.get("timeout"):
-                    st.error(f"The mandi price API timed out fetching data for '{pr_crop}'. Try again in a moment — the 🔄 Retry button above also clears the cached crop list if that's stuck too.")
-                elif not price_debug.get("ok"):
-                    st.error(f"Couldn't reach the mandi price API right now while fetching '{pr_crop}'. Try again shortly.")
+            # ---- Stock-board table: sortable by clicking any column header ----
+            display_df = board.copy()
+            display_df.insert(0, "", display_df["commodity"].apply(icon_of))
+            display_df = display_df.rename(columns={
+                "commodity": "Crop", "avg_modal": "Avg Price (₹/quintal)",
+                "min_price": "Low", "max_price": "High", "markets": "Markets",
+            })
+            display_df["Avg Price (₹/quintal)"] = display_df["Avg Price (₹/quintal)"].round(0)
+
+            selected_row = None
+            try:
+                # Streamlit >= 1.35 supports clickable row selection
+                event = st.dataframe(
+                    display_df, use_container_width=True, hide_index=True,
+                    on_select="rerun", selection_mode="single-row", key="price_board_table",
+                )
+                rows = event.selection.rows if event and event.selection else []
+                if rows:
+                    selected_row = board.iloc[rows[0]]["commodity"]
+            except TypeError:
+                # Older Streamlit without row-click support — table is view-only
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+            if selected_row:
+                st.session_state["_selected_commodity"] = selected_row
+
+            # Fallback / explicit picker, always available even without row-click
+            crop_names = board["commodity"].tolist()
+            current = st.session_state.get("_selected_commodity")
+            default_idx = crop_names.index(current) + 1 if current in crop_names else 0
+            picked = st.selectbox(
+                "Or choose a crop to view", ["— select —"] + crop_names,
+                index=default_idx, key="crop_picker",
+            )
+            if picked != "— select —":
+                st.session_state["_selected_commodity"] = picked
+
+            focus = st.session_state.get("_selected_commodity")
+
+            # ---------------- Drill-down detail for the selected crop ----------------
+            if focus:
+                row = board[board["commodity"] == focus].iloc[0]
+                st.write("")
+                st.markdown(f"### {icon_of(focus)} {focus}")
+
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Avg modal price", f"₹{row['avg_modal']:,.0f}/quintal")
+                m2.metric("Lowest reported", f"₹{row['min_price']:,.0f}")
+                m3.metric("Highest reported", f"₹{row['max_price']:,.0f}")
+                m4.metric("Markets reporting", f"{int(row['markets'])}")
+
+                crop_df = raw_df[raw_df["commodity"] == focus]
+                if "market" in crop_df.columns and not crop_df.empty:
+                    by_market = crop_df.groupby("market", as_index=False)["modal_price"].mean().sort_values("modal_price")
+                    st.caption("Today's price across markets")
+                    st.bar_chart(by_market.set_index("market")["modal_price"])
+
+                # ---- Local history + naive trend projection ----
+                hist = get_commodity_history(selected_state, focus)
+                st.caption("Price trend (built from this app's own daily visits — the source data is a same-day snapshot with no built-in history)")
+                if len(hist) >= 2:
+                    forecast_vals = naive_forecast(hist, days_ahead=3)
+                    chart_df = hist[["date", "avg_modal"]].rename(columns={"avg_modal": "Recorded"}).set_index("date")
+                    if forecast_vals is not None:
+                        last_date = pd.to_datetime(hist["date"].iloc[-1])
+                        future_dates = [(last_date + pd.Timedelta(days=i+1)).strftime("%Y-%m-%d") for i in range(len(forecast_vals))]
+                        proj_df = pd.DataFrame({"date": future_dates, "Projected": forecast_vals}).set_index("date")
+                        combo = pd.concat([chart_df, proj_df], axis=0).sort_index()
+                        st.line_chart(combo)
+                        st.caption(f"Projected next price (naive trend, {len(hist)} day(s) of history so far): ₹{forecast_vals[0]:,.0f}/quintal. Treat as a rough direction, not a guarantee.")
+                    else:
+                        st.line_chart(chart_df)
                 else:
-                    st.error(f"No mandi arrivals found for '{pr_crop}' today in this selection. Try 'All India', or a related crop name (e.g. try just 'Onion' instead of a specific variety).")
-            else:
-                df = df.dropna(subset=["modal_price"])
-                by_market = df.groupby("market", as_index=False)["modal_price"].mean().sort_values("modal_price")
-                st.bar_chart(by_market.set_index("market")["modal_price"])
+                    st.info("Only today's price is logged so far for this crop — come back on a future day to start seeing a trend and projection build up.")
 
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Avg modal price", f"₹{df['modal_price'].mean():,.0f}/quintal")
-                if "min_price" in df.columns:
-                    c2.metric("Lowest reported", f"₹{df['min_price'].min():,.0f}/quintal")
-                if "max_price" in df.columns:
-                    c3.metric("Highest reported", f"₹{df['max_price'].max():,.0f}/quintal")
-
-                st.info(f"**{pr_crop}** — {len(df)} market report(s) found across {df['state'].nunique() if 'state' in df.columns else '?'} state(s) today.")
-
-                with st.expander("Raw mandi records"):
-                    show_cols = [c for c in ["arrival_date","state","district","market","commodity","variety","min_price","max_price","modal_price"] if c in df.columns]
-                    st.dataframe(df[show_cols], use_container_width=True)
-
-                st.caption("Source: data.gov.in (Agmarknet), daily arrivals snapshot. Not a guaranteed future price.")
+        st.caption("Source: data.gov.in (Agmarknet), daily arrivals snapshot.")
 
 # ---------------- TAB 5: WEATHER INTELLIGENCE (DEMO) ----------------
 with tabs[4]:

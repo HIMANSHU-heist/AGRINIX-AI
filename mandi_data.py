@@ -17,12 +17,7 @@ INDIAN_STATES = [
 
 # NOTE: this dataset ("Current Daily Price of Various Commodities from
 # Various Markets") is a DAILY SNAPSHOT, not a historical time series.
-# Not every crop trades in every state every day, so an exact
-# state+commodity filter often legitimately returns zero rows.
-# To stay useful we (1) fetch a generous sample, (2) filter client-side
-# with case-insensitive substring matching instead of a brittle exact
-# server-side filter, and (3) fall back to all-India if a state has
-# no arrivals for that crop today.
+# Not every crop trades in every state every day.
 
 @st.cache_data(ttl=1800)
 def fetch_commodities(api_key, state=None, limit=2000):
@@ -35,25 +30,18 @@ def fetch_commodities(api_key, state=None, limit=2000):
         params["filters[state]"] = state
     try:
         r = requests.get(BASE_URL, params=params, timeout=20)
+        debug_info = {"status_code": r.status_code, "url": r.url}
         r.raise_for_status()
-        records = r.json().get("records", [])
+        data = r.json()
+        records = data.get("records", [])
         commodities = sorted(set(rec.get("commodity", "").strip() for rec in records if rec.get("commodity")))
-        return commodities
-    except Exception:
-        return []
+        return commodities, {"ok": True, "record_count": len(records), **debug_info}
+    except Exception as e:
+        return [], {"ok": False, "error": str(e), "url": getattr(e, "request", None) and str(getattr(e, "request").url) or params}
 
 
 @st.cache_data(ttl=900)
 def fetch_mandi_prices(api_key, commodity, state=None, limit=500):
-    """
-    Fetches a broad sample and filters client-side (case-insensitive,
-    substring match) instead of relying on an exact server-side filter —
-    the API's exact-match filtering is picky about casing/spacing and
-    this dataset only ever has ~1 day of arrivals per commodity, so a
-    strict filter frequently returns nothing even when the crop *is*
-    in the dataset under a slightly different label (e.g. "Tomato" vs
-    "Tomato Hybrid").
-    """
     def _query(state_filter):
         params = {
             "api-key": api_key,
@@ -66,24 +54,30 @@ def fetch_mandi_prices(api_key, commodity, state=None, limit=500):
         r.raise_for_status()
         return r.json().get("records", [])
 
+    debug = {}
     try:
         records = _query(state)
-    except Exception:
-        return pd.DataFrame()
+        debug["first_query_count"] = len(records)
+    except Exception as e:
+        return pd.DataFrame(), {"ok": False, "error": str(e)}
 
     commodity_lower = commodity.strip().lower()
     matched = [rec for rec in records if commodity_lower in rec.get("commodity", "").lower()]
+    debug["matched_in_first_query"] = len(matched)
 
-    # Fallback: if a state filter was given but nothing matched, retry all-India
     if not matched and state:
         try:
             records = _query(None)
+            debug["fallback_query_count"] = len(records)
             matched = [rec for rec in records if commodity_lower in rec.get("commodity", "").lower()]
-        except Exception:
-            pass
+            debug["matched_in_fallback"] = len(matched)
+        except Exception as e:
+            debug["fallback_error"] = str(e)
 
     if not matched:
-        return pd.DataFrame()
+        # surface a few sample commodity names actually present, to help debugging
+        debug["sample_commodities_seen"] = sorted(set(r.get("commodity", "") for r in records))[:15]
+        return pd.DataFrame(), {"ok": True, **debug}
 
     df = pd.DataFrame(matched)
     for col in ["min_price", "max_price", "modal_price"]:
@@ -92,4 +86,4 @@ def fetch_mandi_prices(api_key, commodity, state=None, limit=500):
     if "arrival_date" in df.columns:
         df["arrival_date"] = pd.to_datetime(df["arrival_date"], format="%d/%m/%Y", errors="coerce")
         df = df.sort_values("arrival_date")
-    return df
+    return df, {"ok": True, **debug}

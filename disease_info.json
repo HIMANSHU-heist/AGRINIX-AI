@@ -1,0 +1,62 @@
+{
+  "Pepper__bell___Bacterial_spot": {
+    "severity": "Moderate",
+    "action": "Remove and destroy infected leaves. Apply copper-based bactericide spray every 7-10 days. Avoid overhead irrigation and working in wet fields to prevent spread."
+  },
+  "Pepper__bell___healthy": {
+    "severity": "None",
+    "action": "No treatment needed. Continue regular monitoring."
+  },
+  "Potato___Early_blight": {
+    "severity": "Moderate",
+    "action": "Apply mancozeb or chlorothalonil spray. Remove infected lower leaves. Rotate crops next season to reduce soil-borne spores."
+  },
+  "Potato___Late_blight": {
+    "severity": "High",
+    "action": "Apply systemic fungicide immediately. Destroy infected foliage. Avoid irrigation during humid weather and improve field drainage."
+  },
+  "Potato___healthy": {
+    "severity": "None",
+    "action": "No treatment needed. Continue regular monitoring."
+  },
+  "Tomato_Bacterial_spot": {
+    "severity": "Moderate",
+    "action": "Apply copper-based bactericide. Remove infected plant debris. Avoid overhead watering and rotate crops."
+  },
+  "Tomato_Early_blight": {
+    "severity": "Moderate",
+    "action": "Remove affected lower leaves. Apply chlorothalonil or mancozeb fungicide every 7-10 days. Avoid overhead watering."
+  },
+  "Tomato_Late_blight": {
+    "severity": "High",
+    "action": "Remove and destroy infected plants immediately. Apply copper-based fungicide. Improve field drainage and spacing."
+  },
+  "Tomato_Leaf_Mold": {
+    "severity": "Moderate",
+    "action": "Improve ventilation and reduce humidity around plants. Apply a suitable fungicide and avoid wetting leaves during watering."
+  },
+  "Tomato_Septoria_leaf_spot": {
+    "severity": "Moderate",
+    "action": "Remove infected lower leaves promptly. Apply fungicide (chlorothalonil or copper-based) and avoid overhead irrigation."
+  },
+  "Tomato_Spider_mites_Two_spotted_spider_mite": {
+    "severity": "Moderate",
+    "action": "Spray with miticide or neem oil. Increase humidity around plants and remove heavily infested leaves. Check undersides of leaves regularly."
+  },
+  "Tomato__Target_Spot": {
+    "severity": "Moderate",
+    "action": "Apply fungicide (chlorothalonil or mancozeb). Remove infected leaves and improve air circulation between plants."
+  },
+  "Tomato__Tomato_YellowLeaf__Curl_Virus": {
+    "severity": "High",
+    "action": "Remove and destroy infected plants immediately — this spreads via whiteflies. Control whitefly population with sticky traps or insecticide. Use virus-resistant varieties next season."
+  },
+  "Tomato__Tomato_mosaic_virus": {
+    "severity": "High",
+    "action": "Remove and destroy infected plants — no cure exists. Disinfect tools between plants and wash hands after handling infected plants to prevent spread."
+  },
+  "Tomato_healthy": {
+    "severity": "None",
+    "action": "No treatment needed. Continue regular monitoring."
+  }
+}

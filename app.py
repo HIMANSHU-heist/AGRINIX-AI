@@ -4,6 +4,51 @@ import numpy as np
 import json
 import os
 from datetime import datetime, timedelta
+import cv2
+from PIL import Image
+
+DISEASE_MODEL_PATHS = ["disease_model.keras", os.path.join("model_output", "disease_model.h5")]
+DISEASE_LABELS_PATHS = ["disease_labels.json", os.path.join("model_output", "disease_labels.json")]
+DISEASE_INFO_PATH = "disease_info.json"
+
+disease_model = None
+disease_labels = []
+disease_info = {}
+disease_model_is_real = False
+
+disease_model_path = next((p for p in DISEASE_MODEL_PATHS if os.path.exists(p)), None)
+disease_labels_path = next((p for p in DISEASE_LABELS_PATHS if os.path.exists(p)), None)
+
+if disease_model_path and disease_labels_path:
+    try:
+        import tensorflow as tf
+        disease_model = tf.keras.models.load_model(disease_model_path)
+        with open(disease_labels_path) as f:
+            disease_labels = json.load(f)
+        if os.path.exists(DISEASE_INFO_PATH):
+            with open(DISEASE_INFO_PATH) as f:
+                disease_info = json.load(f)
+        disease_model_is_real = True
+    except Exception as e:
+        st.sidebar.warning(f"Disease model found but couldn't load: {e}")
+
+def preprocess_leaf_image(uploaded_file, img_size=224):
+    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, (img_size, img_size))
+    img = img.astype("float32")
+    img = np.expand_dims(img, axis=0)
+    return img
+
+def predict_disease(uploaded_file):
+    img_array = preprocess_leaf_image(uploaded_file)
+    preds = disease_model.predict(img_array)[0]
+    top_idx = int(np.argmax(preds))
+    label = disease_labels[top_idx]
+    confidence = float(preds[top_idx]) * 100
+    info = disease_info.get(label, {"severity": "Unknown", "action": "Consult a local agriculture officer for exact treatment."})
+    return label, confidence, info
 
 # ============================================================
 # PAGE CONFIG
@@ -261,40 +306,64 @@ with tabs[0]:
         else:
             st.info("Sliders adjust kar and click **Recommend Crop**.")
 
-# ---------------- TAB 2: DISEASE DETECTION (DEMO) ----------------
+# ---------------- TAB 2: DISEASE DETECTION (LIVE - CNN + OpenCV) ----------------
 with tabs[1]:
-    st.markdown('#### Crop Disease Detection <span class="agx-badge badge-demo">DEMO</span>', unsafe_allow_html=True)
-    st.caption("Upload a leaf photo. In production this calls a CNN/Vision Transformer trained on plant-disease imagery.")
-    crop_choice = st.selectbox("Crop", ["Tomato","Potato","Cotton","Wheat","Rice","Grapes"])
-    img = st.file_uploader("Upload leaf image", type=["jpg","jpeg","png"])
+    badge = '<span class="agx-badge badge-live">LIVE MODEL</span>' if disease_model_is_real else '<span class="agx-badge badge-demo">DEMO MODE</span>'
+    st.markdown(f"#### Crop Disease Detection {badge}", unsafe_allow_html=True)
+    st.caption("Upload a leaf photo — MobileNetV2 CNN trained on plant-disease imagery, preprocessed with OpenCV.")
+
+    img = st.file_uploader("Upload leaf image", type=["jpg","jpeg","png"], key="disease_upload")
+
     if img:
-        c1,c2 = st.columns([1,1])
+        c1, c2 = st.columns([1,1])
         with c1:
             st.image(img, caption="Uploaded image", use_container_width=True)
+            img.seek(0)
+
         with c2:
-            demo_result = {
-                "Tomato":("Early Blight", 91.4, "Moderate"),
-                "Potato":("Late Blight", 88.2, "High"),
-                "Cotton":("Leaf Curl Virus", 79.6, "Moderate"),
-                "Wheat":("Healthy", 96.1, "None"),
-                "Rice":("Leaf Blast", 84.3, "Moderate"),
-                "Grapes":("Powdery Mildew", 87.0, "Low"),
-            }[crop_choice]
-            disease, conf, severity = demo_result
-            st.markdown(f"""
-            <div class="agx-result">
-                <div style="font-size:20px; font-weight:800; color:#1B5E20;">{disease}</div>
-                <div style="font-size:13px; color:#558B2F;">Confidence: {conf}% · Severity: {severity}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            st.write("")
-            st.markdown("**Recommended action**")
-            if disease == "Healthy":
-                st.success("No treatment needed. Continue regular monitoring.")
+            if disease_model_is_real:
+                with st.spinner("Analyzing leaf image..."):
+                    label, conf, info = predict_disease(img)
+                disease_display = label.replace("_", " ")
+                st.markdown(f"""
+                <div class="agx-result">
+                    <div style="font-size:20px; font-weight:800; color:#1B5E20;">{disease_display}</div>
+                    <div style="font-size:13px; color:#558B2F;">Confidence: {conf:.1f}% · Severity: {info['severity']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.write("")
+                st.markdown("**Recommended action**")
+                if info["severity"] == "None":
+                    st.success(info["action"])
+                elif info["severity"] == "High":
+                    st.error(info["action"] + " Check the Weather tab before spraying.")
+                else:
+                    st.warning(info["action"] + " Avoid spraying if rain is forecast within 24 hrs — check the Weather tab.")
             else:
-                st.warning(f"Apply recommended fungicide per label dosage for {disease.lower()}. Avoid spraying if rain is forecast within 24 hrs — check the Weather tab.")
+                crop_choice = st.selectbox("Crop", ["Tomato","Potato","Cotton","Wheat","Rice","Grapes"], key="demo_crop_choice")
+                demo_result = {
+                    "Tomato":("Early Blight", 91.4, "Moderate"),
+                    "Potato":("Late Blight", 88.2, "High"),
+                    "Cotton":("Leaf Curl Virus", 79.6, "Moderate"),
+                    "Wheat":("Healthy", 96.1, "None"),
+                    "Rice":("Leaf Blast", 84.3, "Moderate"),
+                    "Grapes":("Powdery Mildew", 87.0, "Low"),
+                }[crop_choice]
+                disease, conf, severity = demo_result
+                st.markdown(f"""
+                <div class="agx-result">
+                    <div style="font-size:20px; font-weight:800; color:#1B5E20;">{disease}</div>
+                    <div style="font-size:13px; color:#558B2F;">Confidence: {conf}% · Severity: {severity}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.write("")
+                st.markdown("**Recommended action**")
+                if disease == "Healthy":
+                    st.success("No treatment needed. Continue regular monitoring.")
+                else:
+                    st.warning(f"Apply recommended fungicide per label dosage for {disease.lower()}. Avoid spraying if rain is forecast within 24 hrs — check the Weather tab.")
     else:
-        st.info("Ek leaf image upload kar demo result baghण्यासाठी.")
+        st.info("Ek leaf image upload kar result baghण्यासाठी.")
 
 # ---------------- TAB 3: YIELD PREDICTION (DEMO) ----------------
 with tabs[2]:
@@ -410,7 +479,6 @@ with tabs[5]:
             st.write("• " + note)
         st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------------- TAB 7: FARMER ASSISTANT (DEMO CHAT) ----------------
 # ---------------- TAB 7: FARMER ASSISTANT (LIVE - GROQ, multilingual, reply-to) ----------------
 with tabs[6]:
     st.markdown('#### AI Farmer Assistant <span class="agx-badge badge-live">LIVE</span>', unsafe_allow_html=True)
@@ -562,4 +630,4 @@ with tabs[7]:
 
 st.write("")
 st.divider()
-st.caption("AGRINEX AI — prototype. Crop Recommendation tab uses the real trained model when crop_model.pkl and crop_labels.json are present in this folder; other tabs are illustrative UI for the full planned system.")
+st.caption("AGRINEX AI — prototype. Crop Recommendation & Disease Detection tabs use real trained models when their files are present in this folder; other tabs are illustrative UI for the full planned system.")

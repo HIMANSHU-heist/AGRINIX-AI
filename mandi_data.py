@@ -57,7 +57,7 @@ def _request(params):
 # "stock board" is built from this single response.
 # ------------------------------------------------------------------
 @st.cache_data(ttl=900)
-def fetch_state_snapshot(api_key, state=None, limit=1500):
+def fetch_state_snapshot(api_key, state=None, limit=500):
     """Returns (df, ok). df has one row per market report, across all
     commodities, for the given state (or all-India if state is None).
     Never raises — on failure returns an empty df and ok=False so the

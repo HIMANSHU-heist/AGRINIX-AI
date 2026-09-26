@@ -33,8 +33,8 @@ INDIAN_STATES = [
 def _get_session():
     session = requests.Session()
     retry = Retry(
-        total=3,
-        backoff_factor=1.5,
+        total=1,
+        backoff_factor=1,
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["GET"],
     )
@@ -44,7 +44,7 @@ def _get_session():
     return session
 
 _session = _get_session()
-REQUEST_TIMEOUT = (10, 45)  # (connect, read)
+REQUEST_TIMEOUT = (5, 15)  # (connect, read)
 
 
 def _request(params):

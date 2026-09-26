@@ -40,7 +40,7 @@ def _get_session():
     return session
 
 _session = _get_session()
-REQUEST_TIMEOUT = (5, 15)  # (connect, read) — kept short so the UI never looks "stuck"
+REQUEST_TIMEOUT = (25, 40)  # (connect, read) — kept short so the UI never looks "stuck"
 
 
 def _request(params):

@@ -414,29 +414,30 @@ with tabs[3]:
         selected_state = st.selectbox("State", ["All India"] + INDIAN_STATES, key="price_state")
         state_filter = None if selected_state == "All India" else selected_state
 
-        # Reset the drilldown selection whenever the state changes
         if st.session_state.get("_price_state_prev") != selected_state:
             st.session_state["_price_state_prev"] = selected_state
             st.session_state["_selected_commodity"] = None
 
         with st.spinner(f"Loading live prices for {selected_state}..."):
-            raw_df, ok = fetch_state_snapshot(data_gov_key, state=state_filter)
+            raw_df, status = fetch_state_snapshot(data_gov_key, state=state_filter)
+
+        # TEMPORARY DEBUG: show the exact failure reason instead of a generic message.
+        # Remove this block once the root cause is confirmed fixed.
+        if status is not True:
+            st.error(f"Debug — live fetch failed: {status}")
 
         board = summarize_by_commodity(raw_df)
 
-        # Quiet fallback: if the live call failed but we have a board from
-        # a previous successful load this session, keep showing that one
-        # instead of an empty/error screen.
-        if not ok or board.empty:
+        if status is not True or board.empty:
             cached = st.session_state.get(f"_board_cache_{selected_state}")
             if cached is not None and not cached.empty:
                 board = cached
-                st.caption("🟡 Live refresh is slow right now — showing the last loaded prices for this state.")
+                st.caption("🟡 Live refresh failed — showing the last loaded prices for this state.")
             else:
-                st.info(f"No live price data available for {selected_state} right now. Try again in a moment, or pick 'All India'.")
+                st.info(f"No live price data available for {selected_state} right now. See the debug message above for the exact reason.")
         else:
             st.session_state[f"_board_cache_{selected_state}"] = board
-            log_daily_snapshot(selected_state, board)  # builds real history over days of use
+            log_daily_snapshot(selected_state, board)
 
         if not board.empty:
             icon_of = lambda name: CROP_ICONS.get(name.strip().lower(), "🌱")
@@ -444,7 +445,6 @@ with tabs[3]:
             st.write("")
             st.caption(f"🟢 {len(board)} crops trading in {selected_state} today · tap a row to open its chart")
 
-            # ---- Stock-board table: sortable by clicking any column header ----
             display_df = board.copy()
             display_df.insert(0, "", display_df["commodity"].apply(icon_of))
             display_df = display_df.rename(columns={
@@ -455,7 +455,6 @@ with tabs[3]:
 
             selected_row = None
             try:
-                # Streamlit >= 1.35 supports clickable row selection
                 event = st.dataframe(
                     display_df, use_container_width=True, hide_index=True,
                     on_select="rerun", selection_mode="single-row", key="price_board_table",
@@ -464,13 +463,11 @@ with tabs[3]:
                 if rows:
                     selected_row = board.iloc[rows[0]]["commodity"]
             except TypeError:
-                # Older Streamlit without row-click support — table is view-only
                 st.dataframe(display_df, use_container_width=True, hide_index=True)
 
             if selected_row:
                 st.session_state["_selected_commodity"] = selected_row
 
-            # Fallback / explicit picker, always available even without row-click
             crop_names = board["commodity"].tolist()
             current = st.session_state.get("_selected_commodity")
             default_idx = crop_names.index(current) + 1 if current in crop_names else 0
@@ -483,7 +480,6 @@ with tabs[3]:
 
             focus = st.session_state.get("_selected_commodity")
 
-            # ---------------- Drill-down detail for the selected crop ----------------
             if focus:
                 row = board[board["commodity"] == focus].iloc[0]
                 st.write("")
@@ -501,7 +497,6 @@ with tabs[3]:
                     st.caption("Today's price across markets")
                     st.bar_chart(by_market.set_index("market")["modal_price"])
 
-                # ---- Local history + naive trend projection ----
                 hist = get_commodity_history(selected_state, focus)
                 st.caption("Price trend (built from this app's own daily visits — the source data is a same-day snapshot with no built-in history)")
                 if len(hist) >= 2:
@@ -584,7 +579,7 @@ with tabs[6]:
 
     import uuid
 
-    client = groq_client  # shared client set up once near the top of the file
+    client = groq_client
     if not groq_ready:
         st.warning("GROQ_API_KEY sapडली nahi — .streamlit/secrets.toml madhe takar Streamlit Cloud settings madhe add kar.")
 
@@ -619,7 +614,6 @@ with tabs[6]:
     def snippet(text, n=60):
         return text if len(text) <= n else text[:n] + "..."
 
-    # ---- Render chat history ----
     for msg in st.session_state.chat:
         with st.chat_message(msg["role"]):
             if msg.get("reply_to"):
@@ -637,7 +631,6 @@ with tabs[6]:
                 st.session_state.replying_to = msg["id"]
                 st.rerun()
 
-    # ---- Reply preview above input ----
     if st.session_state.replying_to:
         original = find_msg(st.session_state.replying_to)
         if original:
@@ -668,7 +661,6 @@ with tabs[6]:
         st.session_state.chat.append(user_msg)
         st.session_state.replying_to = None
 
-        # build context — include the replied-to message explicitly if present
         context_note = ""
         if reply_ref:
             original = find_msg(reply_ref)

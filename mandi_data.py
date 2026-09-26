@@ -1,4 +1,5 @@
 import os
+import json
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -9,6 +10,7 @@ from datetime import datetime
 
 RESOURCE_ID = "9ef84268-d588-465a-a308-a864a43d0070"
 BASE_URL = f"https://api.data.gov.in/resource/{RESOURCE_ID}"
+SNAPSHOT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "mandi_snapshot.json")
 
 INDIAN_STATES = [
     "Andhra Pradesh","Arunachal Pradesh","Assam","Bihar","Chhattisgarh","Goa",
@@ -20,65 +22,75 @@ INDIAN_STATES = [
     "Jammu and Kashmir","Ladakh","Lakshadweep","Puducherry"
 ]
 
-# NOTE: this dataset ("Current Daily Price of Various Commodities from
-# Various Markets") is a DAILY SNAPSHOT, not a historical time series.
-# We build our own history locally (see log_daily_snapshot below) by
-# recording one row per commodity every time the app is used, so a real
-# trend accumulates over the days the app stays in use.
+# ------------------------------------------------------------------
+# PRIMARY PATH: read from data/mandi_snapshot.json, refreshed every
+# few hours by .github/workflows/refresh-mandi-data.yml (runs on
+# GitHub's runners, which have a far more reliable network path to
+# api.data.gov.in than Streamlit Cloud does — Streamlit Cloud's calls
+# were observed to reliably ConnectTimeout / ReadTimeout in production).
+# FALLBACK PATH: a direct live API call, only used if no snapshot file
+# exists yet (e.g. first deploy before the workflow has run once).
+# ------------------------------------------------------------------
+
+@st.cache_data(ttl=1800)
+def _load_snapshot():
+    """Returns (records, fetched_at_str) or (None, None) if no snapshot yet."""
+    if not os.path.exists(SNAPSHOT_PATH):
+        return None, None
+    try:
+        with open(SNAPSHOT_PATH) as f:
+            data = json.load(f)
+        return data.get("records", []), data.get("fetched_at")
+    except Exception:
+        return None, None
+
 
 def _get_session():
     session = requests.Session()
-    retry = Retry(
-        total=1,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET"],
-    )
+    retry = Retry(total=1, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["GET"])
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("https://", adapter)
-    session.mount("http://", adapter)
     return session
 
 _session = _get_session()
-REQUEST_TIMEOUT = (25, 40)  # (connect, read) — kept short so the UI never looks "stuck"
+LIVE_TIMEOUT = (10, 20)
 
 
-def _request(params):
-    return _session.get(BASE_URL, params=params, timeout=REQUEST_TIMEOUT)
-
-
-@st.cache_data(ttl=900)
-def fetch_state_snapshot(api_key, state=None, limit=500):
-    """Returns (df, status). status is True on success (even if empty),
-    or a string starting with 'ERROR:' describing exactly what failed —
-    so the UI can show the real cause instead of a generic message."""
-    if not api_key:
-        return pd.DataFrame(), "ERROR: no DATA_GOV_API_KEY configured"
-
+def _live_fetch(api_key, state=None, limit=500):
     params = {"api-key": api_key, "format": "json", "limit": limit}
     if state:
         params["filters[state]"] = state
-
     try:
-        r = _request(params)
-    except requests.exceptions.Timeout as e:
-        return pd.DataFrame(), f"ERROR: Timeout contacting data.gov.in: {e}"
-    except requests.exceptions.ConnectionError as e:
-        return pd.DataFrame(), f"ERROR: ConnectionError reaching data.gov.in: {e}"
+        r = _session.get(BASE_URL, params=params, timeout=LIVE_TIMEOUT)
+        r.raise_for_status()
+        return r.json().get("records", []), None
     except Exception as e:
-        return pd.DataFrame(), f"ERROR: {type(e).__name__}: {e}"
+        return None, f"{type(e).__name__}: {e}"
 
-    if r.status_code != 200:
-        return pd.DataFrame(), f"ERROR: HTTP {r.status_code} from data.gov.in: {r.text[:300]}"
 
-    try:
-        payload = r.json()
-    except Exception as e:
-        return pd.DataFrame(), f"ERROR: response wasn't valid JSON: {e} — raw start: {r.text[:200]}"
+def fetch_state_snapshot(api_key, state=None, limit=500):
+    """
+    Returns (df, status). status is True on success, or a string
+    starting with 'ERROR:' if both the local snapshot and the live
+    fallback failed.
+    """
+    records, fetched_at = _load_snapshot()
 
-    records = payload.get("records", [])
+    if records is not None:
+        if state:
+            records = [r for r in records if r.get("state", "").strip().lower() == state.strip().lower()]
+        source_note = f"snapshot from {fetched_at}" if fetched_at else "local snapshot"
+    else:
+        # no snapshot on disk yet — try a direct live call as a one-time fallback
+        if not api_key:
+            return pd.DataFrame(), "ERROR: no snapshot file and no DATA_GOV_API_KEY configured"
+        records, err = _live_fetch(api_key, state=state, limit=limit)
+        if records is None:
+            return pd.DataFrame(), f"ERROR: no local snapshot yet, and live fallback failed: {err}"
+        source_note = "live fallback (no snapshot yet)"
+
     if not records:
-        return pd.DataFrame(), True  # genuinely no rows for this filter today
+        return pd.DataFrame(), True
 
     df = pd.DataFrame(records)
     for col in ["min_price", "max_price", "modal_price"]:
@@ -87,6 +99,7 @@ def fetch_state_snapshot(api_key, state=None, limit=500):
     df = df.dropna(subset=["modal_price"]) if "modal_price" in df.columns else df
     if "commodity" in df.columns:
         df["commodity"] = df["commodity"].str.strip()
+    df.attrs["source_note"] = source_note
     return df, True
 
 

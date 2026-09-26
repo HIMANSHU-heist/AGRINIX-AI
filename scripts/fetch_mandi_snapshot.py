@@ -23,9 +23,9 @@ BASE_URL = f"https://api.data.gov.in/resource/{RESOURCE_ID}"
 OUTPUT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "mandi_snapshot.json")
 
 PAGE_SIZE = 100          # small pages — large ones time out on this API
-MAX_PAGES = 40           # 40 x 100 = up to 4000 records
-PAGE_TIMEOUT = 30        # seconds per attempt
-RETRIES_PER_PAGE = 2
+MAX_PAGES = 5          # 40 x 100 = up to 4000 records
+PAGE_TIMEOUT = 120     # seconds per attempt
+RETRIES_PER_PAGE = 1
 SLEEP_BETWEEN_PAGES = 1  # be polite / avoid rate limiting
 
 

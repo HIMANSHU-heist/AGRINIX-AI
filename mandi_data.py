@@ -26,10 +26,6 @@ INDIAN_STATES = [
 # recording one row per commodity every time the app is used, so a real
 # trend accumulates over the days the app stays in use.
 
-# ------------------------------------------------------------------
-# Shared session with retries + generous, split connect/read timeouts,
-# so a single slow response from data.gov.in doesn't hard-fail the UI.
-# ------------------------------------------------------------------
 def _get_session():
     session = requests.Session()
     retry = Retry(
@@ -44,36 +40,45 @@ def _get_session():
     return session
 
 _session = _get_session()
-REQUEST_TIMEOUT = (5, 15)  # (connect, read)
+REQUEST_TIMEOUT = (5, 15)  # (connect, read) — kept short so the UI never looks "stuck"
 
 
 def _request(params):
     return _session.get(BASE_URL, params=params, timeout=REQUEST_TIMEOUT)
 
 
-# ------------------------------------------------------------------
-# ONE call that pulls every commodity trading in a state today.
-# This replaces fetching commodities + prices separately — the whole
-# "stock board" is built from this single response.
-# ------------------------------------------------------------------
 @st.cache_data(ttl=900)
 def fetch_state_snapshot(api_key, state=None, limit=500):
-    """Returns (df, ok). df has one row per market report, across all
-    commodities, for the given state (or all-India if state is None).
-    Never raises — on failure returns an empty df and ok=False so the
-    UI can quietly fall back instead of showing a traceback."""
+    """Returns (df, status). status is True on success (even if empty),
+    or a string starting with 'ERROR:' describing exactly what failed —
+    so the UI can show the real cause instead of a generic message."""
+    if not api_key:
+        return pd.DataFrame(), "ERROR: no DATA_GOV_API_KEY configured"
+
     params = {"api-key": api_key, "format": "json", "limit": limit}
     if state:
         params["filters[state]"] = state
+
     try:
         r = _request(params)
-        r.raise_for_status()
-        records = r.json().get("records", [])
-    except Exception:
-        return pd.DataFrame(), False
+    except requests.exceptions.Timeout as e:
+        return pd.DataFrame(), f"ERROR: Timeout contacting data.gov.in: {e}"
+    except requests.exceptions.ConnectionError as e:
+        return pd.DataFrame(), f"ERROR: ConnectionError reaching data.gov.in: {e}"
+    except Exception as e:
+        return pd.DataFrame(), f"ERROR: {type(e).__name__}: {e}"
 
+    if r.status_code != 200:
+        return pd.DataFrame(), f"ERROR: HTTP {r.status_code} from data.gov.in: {r.text[:300]}"
+
+    try:
+        payload = r.json()
+    except Exception as e:
+        return pd.DataFrame(), f"ERROR: response wasn't valid JSON: {e} — raw start: {r.text[:200]}"
+
+    records = payload.get("records", [])
     if not records:
-        return pd.DataFrame(), True
+        return pd.DataFrame(), True  # genuinely no rows for this filter today
 
     df = pd.DataFrame(records)
     for col in ["min_price", "max_price", "modal_price"]:
@@ -86,7 +91,6 @@ def fetch_state_snapshot(api_key, state=None, limit=500):
 
 
 def summarize_by_commodity(df):
-    """Stock-board rows: one per commodity, today's price stats across markets."""
     if df.empty or "commodity" not in df.columns:
         return pd.DataFrame()
     g = df.groupby("commodity").agg(
@@ -99,12 +103,6 @@ def summarize_by_commodity(df):
     return g
 
 
-# ------------------------------------------------------------------
-# Local day-over-day history, so the board can show a real trend once
-# the app has been used across more than one day. Storage is a plain
-# CSV per state on local disk — it persists for as long as the app's
-# container/session stays alive, but is not a permanent database.
-# ------------------------------------------------------------------
 HISTORY_DIR = "price_history"
 
 
@@ -115,8 +113,6 @@ def _history_path(state):
 
 
 def log_daily_snapshot(state, summary_df):
-    """Append today's avg price per commodity. Safe to call every run —
-    de-duplicates so the same day+commodity is only stored once (latest wins)."""
     if summary_df.empty:
         return
     try:
@@ -132,7 +128,7 @@ def log_daily_snapshot(state, summary_df):
             combined = rows
         combined.to_csv(path, index=False)
     except Exception:
-        pass  # history is a nice-to-have; never let it break the main view
+        pass
 
 
 def get_commodity_history(state, commodity):
@@ -148,8 +144,6 @@ def get_commodity_history(state, commodity):
 
 
 def naive_forecast(history_df, days_ahead=3):
-    """Simple linear projection from locally logged history. Returns None
-    if there isn't enough history yet to draw a trend from (< 2 days)."""
     if history_df is None or len(history_df) < 2:
         return None
     y = history_df["avg_modal"].values

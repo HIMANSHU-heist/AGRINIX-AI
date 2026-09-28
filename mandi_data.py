@@ -1,8 +1,6 @@
 import os
 import json
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -22,75 +20,46 @@ INDIAN_STATES = [
     "Jammu and Kashmir","Ladakh","Lakshadweep","Puducherry"
 ]
 
-# ------------------------------------------------------------------
-# PRIMARY PATH: read from data/mandi_snapshot.json, refreshed every
-# few hours by .github/workflows/refresh-mandi-data.yml (runs on
-# GitHub's runners, which have a far more reliable network path to
-# api.data.gov.in than Streamlit Cloud does — Streamlit Cloud's calls
-# were observed to reliably ConnectTimeout / ReadTimeout in production).
-# FALLBACK PATH: a direct live API call, only used if no snapshot file
-# exists yet (e.g. first deploy before the workflow has run once).
-# ------------------------------------------------------------------
-
 @st.cache_data(ttl=1800)
 def _load_snapshot():
-    """Returns (records, fetched_at_str) or (None, None) if no snapshot yet."""
     if not os.path.exists(SNAPSHOT_PATH):
-        return None, None
+        return None
     try:
         with open(SNAPSHOT_PATH) as f:
             data = json.load(f)
-        return data.get("records", []), data.get("fetched_at")
+        return data.get("records", [])
     except Exception:
-        return None, None
+        return None
 
 
-def _get_session():
-    session = requests.Session()
-    retry = Retry(total=1, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["GET"])
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("https://", adapter)
-    return session
-
-_session = _get_session()
-LIVE_TIMEOUT = (10, 20)
-
-
-def _live_fetch(api_key, state=None, limit=500):
+@st.cache_data(ttl=900)
+def _live_fetch(api_key, state=None, limit=300):
     params = {"api-key": api_key, "format": "json", "limit": limit}
     if state:
         params["filters[state]"] = state
     try:
-        r = _session.get(BASE_URL, params=params, timeout=LIVE_TIMEOUT)
+        r = requests.get(BASE_URL, params=params, timeout=20)
         r.raise_for_status()
-        return r.json().get("records", []), None
-    except Exception as e:
-        return None, f"{type(e).__name__}: {e}"
+        return r.json().get("records", [])
+    except Exception:
+        return None
 
 
-def fetch_state_snapshot(api_key, state=None, limit=500):
-    """
-    Returns (df, status). status is True on success, or a string
-    starting with 'ERROR:' if both the local snapshot and the live
-    fallback failed.
-    """
-    records, fetched_at = _load_snapshot()
-
-    if records is not None:
-        if state:
-            records = [r for r in records if r.get("state", "").strip().lower() == state.strip().lower()]
-        source_note = f"snapshot from {fetched_at}" if fetched_at else "local snapshot"
-    else:
-        # no snapshot on disk yet — try a direct live call as a one-time fallback
-        if not api_key:
-            return pd.DataFrame(), "ERROR: no snapshot file and no DATA_GOV_API_KEY configured"
-        records, err = _live_fetch(api_key, state=state, limit=limit)
-        if records is None:
-            return pd.DataFrame(), f"ERROR: no local snapshot yet, and live fallback failed: {err}"
-        source_note = "live fallback (no snapshot yet)"
+def fetch_state_snapshot(api_key, state=None, limit=300):
+    """Returns a DataFrame of today's mandi records for the given state
+    (or all-India). Tries a live API call first; if that's slow/unavailable,
+    quietly falls back to the last committed snapshot file, if any."""
+    records = _live_fetch(api_key, state=state, limit=limit) if api_key else None
 
     if not records:
-        return pd.DataFrame(), True
+        snapshot_records = _load_snapshot()
+        if snapshot_records:
+            records = snapshot_records
+            if state:
+                records = [r for r in records if r.get("state", "").strip().lower() == state.strip().lower()]
+
+    if not records:
+        return pd.DataFrame()
 
     df = pd.DataFrame(records)
     for col in ["min_price", "max_price", "modal_price"]:
@@ -99,8 +68,7 @@ def fetch_state_snapshot(api_key, state=None, limit=500):
     df = df.dropna(subset=["modal_price"]) if "modal_price" in df.columns else df
     if "commodity" in df.columns:
         df["commodity"] = df["commodity"].str.strip()
-    df.attrs["source_note"] = source_note
-    return df, True
+    return df
 
 
 def summarize_by_commodity(df):

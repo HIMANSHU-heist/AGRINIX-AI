@@ -38,11 +38,12 @@ def geocode_location(place_name):
 
 @st.cache_data(ttl=1800)
 def fetch_7day_forecast(lat, lon):
-    """Returns a dict with daily arrays: dates, max/min temp, rain probability, weather codes."""
+    """Returns a dict with daily arrays: dates, max/min temp, rain probability,
+    max wind speed (km/h), and weather codes."""
     params = {
         "latitude": lat,
         "longitude": lon,
-        "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode",
+        "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,windspeed_10m_max,weathercode",
         "timezone": "auto",
         "forecast_days": 7,
     }
@@ -56,3 +57,40 @@ def fetch_7day_forecast(lat, lon):
 
 def icon_for_code(code):
     return WEATHER_CODE_ICONS.get(code, "🌡️")
+
+
+def generate_weather_advisory(groq_client, location, crop, daily, model_name="openai/gpt-oss-20b"):
+    """
+    Uses the LLM to REASON over the real fetched 7-day forecast (temps, rain
+    probability, wind) for a specific crop — never to invent weather data,
+    only to translate real numbers into a practical farming decision.
+    """
+    dates = daily["time"]
+    lines = []
+    for i in range(len(dates)):
+        lines.append(
+            f"{dates[i]}: {daily['temperature_2m_max'][i]:.0f}/{daily['temperature_2m_min'][i]:.0f}°C, "
+            f"{daily['precipitation_probability_max'][i]}% rain chance, "
+            f"wind up to {daily['windspeed_10m_max'][i]:.0f} km/h"
+        )
+    forecast_text = "\n".join(lines)
+
+    prompt = f"""You are AGRINEX AI's farming weather advisor. Here is the REAL 7-day forecast
+for {location} (from Open-Meteo — use only these numbers, never invent different ones):
+
+{forecast_text}
+
+The farmer is growing (or considering): {crop}.
+
+In 3-4 short sentences, plain and practical:
+1. Call out the single most important thing this week's weather means for {crop} (irrigation need, disease/fungus risk from humidity+rain, wind damage risk, or a good spraying/harvest window).
+2. Recommend the best day(s) this week for a specific field activity (spraying, irrigation, harvesting) based on the actual numbers above.
+No markdown headers, no invented numbers beyond what's given above."""
+
+    response = groq_client.chat.completions.create(
+        model=model_name,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+        max_tokens=220,
+    )
+    return response.choices[0].message.content

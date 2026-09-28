@@ -106,13 +106,13 @@ sentence (max 20 words). No markdown, no asterisks, no emojis.
   "action": "one practical thing the farmer should do now"
 }}"""
 
-        response = groq_client.chat.completions.create(
+    response = groq_client.chat.completions.create(
         model=model_name,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
-        max_tokens=800,
+        max_tokens=800,  # reasoning tokens also count here
         response_format={"type": "json_object"},
-        extra_body={"reasoning_effort": "low"},   # old SDK madhe pan chalto
+        extra_body={"reasoning_effort": "low"},  # works on older groq SDKs too
     )
     text = response.choices[0].message.content or ""
     try:

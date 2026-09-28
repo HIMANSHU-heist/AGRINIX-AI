@@ -9,8 +9,9 @@ from PIL import Image
 from mandi_data import (
     INDIAN_STATES, fetch_state_snapshot, summarize_by_commodity,
     log_daily_snapshot, get_commodity_history, naive_forecast,
+    generate_price_advisory,
 )
-from weather_utils import geocode_location, fetch_7day_forecast, icon_for_code
+from weather_utils import geocode_location, fetch_7day_forecast, icon_for_code, generate_weather_advisory
 
 DISEASE_MODEL_PATHS = ["disease_model.keras", os.path.join("model_output", "disease_model.h5")]
 DISEASE_LABELS_PATHS = ["disease_labels.json", os.path.join("model_output", "disease_labels.json")]
@@ -495,6 +496,18 @@ with tabs[3]:
                 else:
                     st.line_chart(chart_df)
 
+            st.write("")
+            st.markdown("**🤖 AI Advisor's take** <span class=\"agx-badge badge-live\">AGENT</span>", unsafe_allow_html=True)
+            if groq_ready:
+                with st.spinner("Analyzing today's prices..."):
+                    try:
+                        advisory = generate_price_advisory(groq_client, focus, row, selected_state, hist if len(hist) >= 2 else None)
+                        st.info(advisory)
+                    except Exception as e:
+                        st.caption(f"Advisory unavailable right now: {e}")
+            else:
+                st.caption("Add GROQ_API_KEY to enable the AI selling advisory here.")
+
     st.caption("Source: data.gov.in (Agmarknet), daily arrivals snapshot.")
 
 # ---------------- TAB 5: WEATHER INTELLIGENCE (LIVE - Open-Meteo) ----------------
@@ -514,18 +527,21 @@ with tabs[4]:
             tmax = daily["temperature_2m_max"]
             tmin = daily["temperature_2m_min"]
             rain_prob = daily["precipitation_probability_max"]
+            wind_max = daily.get("windspeed_10m_max", [None] * len(dates))
             codes = daily["weathercode"]
 
             st.caption(f"📍 {geo['resolved_name']}")
             cols = st.columns(len(dates))
             for i, col in enumerate(cols):
                 with col:
+                    wind_line = f"💨 {wind_max[i]:.0f} km/h" if wind_max[i] is not None else ""
                     st.markdown(f"""
                     <div class="agx-card" style="text-align:center; padding:12px;">
                         <div style="font-size:12px; color:#777;">{dates[i].strftime('%a')}</div>
                         <div style="font-size:22px;">{icon_for_code(codes[i])}</div>
                         <div style="font-size:13px; font-weight:700;">{tmax[i]:.0f}° / {tmin[i]:.0f}°C</div>
                         <div style="font-size:11px; color:#2E7D32;">{rain_prob[i]}% rain</div>
+                        <div style="font-size:11px; color:#5C7CFA;">{wind_line}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -535,6 +551,24 @@ with tabs[4]:
                 st.warning(f"⚠️ High rain probability on **{', '.join(high_rain_days)}** — consider postponing spraying or fertilizer application on those days.")
             else:
                 st.success("✅ No high-rain days in the next 7 days — a good window for spraying or harvest activity.")
+
+            high_wind_days = [dates[i].strftime('%A') for i in range(len(dates)) if wind_max[i] is not None and wind_max[i] > 30]
+            if high_wind_days:
+                st.warning(f"💨 Strong winds expected on **{', '.join(high_wind_days)}** — avoid spraying (drift risk) and check support stakes for tall/climbing crops.")
+
+            st.write("")
+            st.markdown("**🤖 AI Crop-Weather Advisory** <span class=\"agx-badge badge-live\">AGENT</span>", unsafe_allow_html=True)
+            advisory_crop = st.selectbox("Crop for this advisory", list(CROP_ICONS.keys()), key="weather_advisory_crop")
+            if groq_ready:
+                with st.spinner("Reasoning over this week's forecast..."):
+                    try:
+                        advisory = generate_weather_advisory(groq_client, geo["resolved_name"], advisory_crop, daily)
+                        st.info(advisory)
+                    except Exception as e:
+                        st.caption(f"Advisory unavailable right now: {e}")
+            else:
+                st.caption("Add GROQ_API_KEY to enable the AI crop-weather advisory here.")
+
             st.caption("Source: Open-Meteo.")
 
 # ---------------- TAB 6: SOIL ANALYSIS (DEMO) ----------------

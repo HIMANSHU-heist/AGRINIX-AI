@@ -2,7 +2,7 @@
 
 AGRINEX AI is an intelligent agriculture platform built to help Indian farmers make better decisions — combining trained ML models, a RAG-based advisory agent, live government/weather data, and a multi-agent architecture, all wrapped in a Streamlit app with production-grade CI/CD around it.
 
-Live app: *(add your Streamlit Cloud URL here)*
+Live app: **[agrinixai.streamlit.app](https://agrinixai.streamlit.app/)**
 
 ---
 

@@ -133,3 +133,39 @@ def naive_forecast(history_df, days_ahead=3):
     future_x = np.arange(len(y), len(y) + days_ahead)
     future_y = np.polyval(coeffs, future_x)
     return future_y
+
+
+def generate_price_advisory(groq_client, commodity, row, state, hist, model_name="openai/gpt-oss-20b"):
+    """
+    Uses the LLM to reason over the REAL fetched price numbers (today's
+    avg/min/max/markets, plus any locally-tracked day-over-day trend) and
+    turn them into a plain selling/holding recommendation. Never invents
+    prices — only interprets the numbers already fetched.
+    """
+    trend_text = "No multi-day trend tracked yet for this crop in this state."
+    if hist is not None and len(hist) >= 2:
+        direction = "rising" if hist["avg_modal"].iloc[-1] > hist["avg_modal"].iloc[0] else "falling"
+        trend_text = f"Tracked over {len(hist)} day(s) of app usage, average price has been {direction} (from ₹{hist['avg_modal'].iloc[0]:,.0f} to ₹{hist['avg_modal'].iloc[-1]:,.0f})."
+
+    prompt = f"""You are AGRINEX AI's market advisor. Here is REAL, just-fetched mandi data
+for {commodity} in {state} today (use only these numbers, never invent different ones):
+
+- Average modal price: Rs {row['avg_modal']:,.0f}/quintal
+- Lowest reported: Rs {row['min_price']:,.0f}
+- Highest reported: Rs {row['max_price']:,.0f}
+- Markets reporting: {int(row['markets'])}
+
+{trend_text}
+
+In 2-3 short sentences, plain and practical: give the farmer a clear lean —
+sell now, hold a few days, or spread sales across markets — based only on
+the numbers above, and one sentence on why. Be honest that this is a
+same-day snapshot, not a guarantee. No markdown headers."""
+
+    response = groq_client.chat.completions.create(
+        model=model_name,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+        max_tokens=200,
+    )
+    return response.choices[0].message.content

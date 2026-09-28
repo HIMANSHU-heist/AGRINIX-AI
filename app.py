@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import json
 import os
+import re
+import html as _html
 from datetime import datetime, timedelta
 import cv2
 from PIL import Image
@@ -12,7 +14,50 @@ from mandi_data import (
     generate_price_advisory,
 )
 from weather_utils import geocode_location, fetch_7day_forecast, icon_for_code, generate_weather_advisory
-from groq import Groq    
+from groq import Groq
+
+
+# ============================================================
+# NEAT ADVISORY RENDERERS
+# ============================================================
+def render_weather_advisory(adv):
+    """Structured weather advisory (dict from generate_weather_advisory) as a clean card."""
+    if not adv or "raw" in adv:
+        st.info((adv or {}).get("raw") or "Advisory unavailable right now.")
+        return
+    rows = [
+        ("📌", "Summary", adv.get("headline", "")),
+        ("⚠️", "Key risk", adv.get("key_risk", "")),
+        ("📅", "Best day", adv.get("best_day", "")),
+        ("✅", "What to do", adv.get("action", "")),
+    ]
+    body = "".join(
+        f'<div style="display:flex; gap:10px; padding:8px 0; border-bottom:1px solid #DCEBDD;">'
+        f'<div style="font-size:18px;">{icon}</div>'
+        f'<div><div style="font-size:11px; font-weight:700; color:#558B2F; letter-spacing:0.04em; text-transform:uppercase;">{label}</div>'
+        f'<div style="font-size:14px; color:#1F3D24;">{_html.escape(text)}</div></div></div>'
+        for icon, label, text in rows if text
+    )
+    st.markdown(
+        f'<div style="background:#F1F8F2; border:1px solid #A5D6A7; border-radius:12px; padding:8px 18px;">{body}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_clean_advice(text):
+    """Strips markdown and shows free-text LLM advice as neat bullet points."""
+    text = re.sub(r"[*_`#>]+", "", text or "").strip()
+    parts = [s.strip() for s in re.split(r"(?<=[.!?।])\s+|\n+", text) if s.strip()]
+    if not parts:
+        st.caption("Advisory unavailable right now.")
+        return
+    bullets = "".join(f"<li style='margin-bottom:6px;'>{_html.escape(p)}</li>" for p in parts)
+    st.markdown(
+        f'<div style="background:#F1F8F2; border:1px solid #A5D6A7; border-radius:12px; '
+        f'padding:14px 20px; color:#1F3D24; font-size:14px;"><ul style="margin:0; padding-left:18px;">{bullets}</ul></div>',
+        unsafe_allow_html=True,
+    )
+
 
 DISEASE_MODEL_PATHS = ["disease_model.keras", os.path.join("model_output", "disease_model.h5")]
 DISEASE_LABELS_PATHS = ["disease_labels.json", os.path.join("model_output", "disease_labels.json")]
@@ -302,7 +347,7 @@ with tabs[0]:
                             location=location,
                             season=season,
                         )
-                        st.info(result["explanation"])
+                        render_clean_advice(result["explanation"])
                         with st.expander("📚 Regional knowledge the agent used"):
                             if result["retrieved_context"]:
                                 for r in result["retrieved_context"]:
@@ -505,7 +550,7 @@ with tabs[3]:
                 with st.spinner("Analyzing today's prices..."):
                     try:
                         advisory = generate_price_advisory(groq_client, focus, row, selected_state, hist if len(hist) >= 2 else None)
-                        st.info(advisory)
+                        render_clean_advice(advisory)
                     except Exception as e:
                         st.caption(f"Advisory unavailable right now: {e}")
             else:
@@ -566,7 +611,7 @@ with tabs[4]:
                 with st.spinner("Reasoning over this week's forecast..."):
                     try:
                         advisory = generate_weather_advisory(groq_client, geo["resolved_name"], advisory_crop, daily)
-                        st.info(advisory)
+                        render_weather_advisory(advisory)
                     except Exception as e:
                         st.caption(f"Advisory unavailable right now: {e}")
             else:

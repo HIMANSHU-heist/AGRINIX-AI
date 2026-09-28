@@ -10,6 +10,7 @@ from mandi_data import (
     INDIAN_STATES, fetch_state_snapshot, summarize_by_commodity,
     log_daily_snapshot, get_commodity_history, naive_forecast,
 )
+from weather_utils import geocode_location, fetch_7day_forecast, icon_for_code
 
 DISEASE_MODEL_PATHS = ["disease_model.keras", os.path.join("model_output", "disease_model.h5")]
 DISEASE_LABELS_PATHS = ["disease_labels.json", os.path.join("model_output", "disease_labels.json")]
@@ -404,145 +405,137 @@ with tabs[2]:
 
 # ---------------- TAB 4: PRICE FORECAST — live state-wide market board ----------------
 with tabs[3]:
-    badge = '<span class="agx-badge badge-live">LIVE DATA</span>' if data_gov_key else '<span class="agx-badge badge-demo">DEMO MODE</span>'
-    st.markdown(f"#### Market Price Board {badge}", unsafe_allow_html=True)
-    st.caption("Pick a state to see every crop's live mandi price at once — tap any crop below to open its own chart.")
+    st.markdown(f"#### Market Price Board <span class=\"agx-badge badge-live\">LIVE</span>", unsafe_allow_html=True)
+    st.caption("Pick a state to see crop mandi prices — tap any crop below to open its own chart.")
 
-    if not data_gov_key:
-        st.warning("DATA_GOV_API_KEY sapडली nahi — .streamlit/secrets.toml madhe takar Streamlit Cloud settings madhe add kar.")
+    selected_state = st.selectbox("State", ["All India"] + INDIAN_STATES, key="price_state")
+    state_filter = None if selected_state == "All India" else selected_state
+
+    if st.session_state.get("_price_state_prev") != selected_state:
+        st.session_state["_price_state_prev"] = selected_state
+        st.session_state["_selected_commodity"] = None
+
+    with st.spinner(f"Loading prices for {selected_state}..."):
+        raw_df = fetch_state_snapshot(data_gov_key, state=state_filter)
+
+    board = summarize_by_commodity(raw_df)
+
+    if board.empty:
+        st.info(f"No price data available for {selected_state} right now. Try 'All India' or check back shortly.")
     else:
-        selected_state = st.selectbox("State", ["All India"] + INDIAN_STATES, key="price_state")
-        state_filter = None if selected_state == "All India" else selected_state
+        log_daily_snapshot(selected_state, board)
+        icon_of = lambda name: CROP_ICONS.get(name.strip().lower(), "🌱")
 
-        if st.session_state.get("_price_state_prev") != selected_state:
-            st.session_state["_price_state_prev"] = selected_state
-            st.session_state["_selected_commodity"] = None
+        st.write("")
+        st.caption(f"🟢 {len(board)} crops with reported prices in {selected_state} · tap a row or pick below")
 
-        with st.spinner(f"Loading live prices for {selected_state}..."):
-            raw_df, status = fetch_state_snapshot(data_gov_key, state=state_filter)
+        display_df = board.copy()
+        display_df.insert(0, "", display_df["commodity"].apply(icon_of))
+        display_df = display_df.rename(columns={
+            "commodity": "Crop", "avg_modal": "Avg Price (₹/quintal)",
+            "min_price": "Low", "max_price": "High", "markets": "Markets",
+        })
+        display_df["Avg Price (₹/quintal)"] = display_df["Avg Price (₹/quintal)"].round(0)
 
-        # TEMPORARY DEBUG: show the exact failure reason instead of a generic message.
-        # Remove this block once the root cause is confirmed fixed.
-        if status is not True:
-            st.error(f"Debug — live fetch failed: {status}")
+        selected_row = None
+        try:
+            event = st.dataframe(
+                display_df, use_container_width=True, hide_index=True,
+                on_select="rerun", selection_mode="single-row", key="price_board_table",
+            )
+            rows = event.selection.rows if event and event.selection else []
+            if rows:
+                selected_row = board.iloc[rows[0]]["commodity"]
+        except TypeError:
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-        board = summarize_by_commodity(raw_df)
+        if selected_row:
+            st.session_state["_selected_commodity"] = selected_row
 
-        if status is not True or board.empty:
-            cached = st.session_state.get(f"_board_cache_{selected_state}")
-            if cached is not None and not cached.empty:
-                board = cached
-                st.caption("🟡 Live refresh failed — showing the last loaded prices for this state.")
-            else:
-                st.info(f"No live price data available for {selected_state} right now. See the debug message above for the exact reason.")
+        crop_names = board["commodity"].tolist()
+        current = st.session_state.get("_selected_commodity")
+        default_idx = crop_names.index(current) + 1 if current in crop_names else 0
+        picked = st.selectbox(
+            "Or choose a crop to view", ["— select —"] + crop_names,
+            index=default_idx, key="crop_picker",
+        )
+        if picked != "— select —":
+            st.session_state["_selected_commodity"] = picked
+
+        focus = st.session_state.get("_selected_commodity")
+
+        if focus:
+            row = board[board["commodity"] == focus].iloc[0]
+            st.write("")
+            st.markdown(f"### {icon_of(focus)} {focus}")
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Avg modal price", f"₹{row['avg_modal']:,.0f}/quintal")
+            m2.metric("Lowest reported", f"₹{row['min_price']:,.0f}")
+            m3.metric("Highest reported", f"₹{row['max_price']:,.0f}")
+            m4.metric("Markets reporting", f"{int(row['markets'])}")
+
+            crop_df = raw_df[raw_df["commodity"] == focus]
+            if "market" in crop_df.columns and not crop_df.empty:
+                by_market = crop_df.groupby("market", as_index=False)["modal_price"].mean().sort_values("modal_price")
+                st.caption("Price across markets")
+                st.bar_chart(by_market.set_index("market")["modal_price"])
+
+            hist = get_commodity_history(selected_state, focus)
+            if len(hist) >= 2:
+                forecast_vals = naive_forecast(hist, days_ahead=3)
+                chart_df = hist[["date", "avg_modal"]].rename(columns={"avg_modal": "Recorded"}).set_index("date")
+                if forecast_vals is not None:
+                    last_date = pd.to_datetime(hist["date"].iloc[-1])
+                    future_dates = [(last_date + pd.Timedelta(days=i+1)).strftime("%Y-%m-%d") for i in range(len(forecast_vals))]
+                    proj_df = pd.DataFrame({"date": future_dates, "Projected": forecast_vals}).set_index("date")
+                    combo = pd.concat([chart_df, proj_df], axis=0).sort_index()
+                    st.line_chart(combo)
+                    st.caption(f"Projected next price (trend from {len(hist)} day(s) tracked): ₹{forecast_vals[0]:,.0f}/quintal — a rough direction, not a guarantee.")
+                else:
+                    st.line_chart(chart_df)
+
+    st.caption("Source: data.gov.in (Agmarknet), daily arrivals snapshot.")
+
+# ---------------- TAB 5: WEATHER INTELLIGENCE (LIVE - Open-Meteo) ----------------
+with tabs[4]:
+    st.markdown('#### Weather Intelligence <span class="agx-badge badge-live">LIVE</span>', unsafe_allow_html=True)
+    st.caption(f"7-day forecast for {location}, with a farming decision — not just a number.")
+
+    geo = geocode_location(location)
+    if not geo:
+        st.warning(f"Couldn't find '{location}' — try a format like 'Nashik, Maharashtra'.")
+    else:
+        daily = fetch_7day_forecast(geo["lat"], geo["lon"])
+        if not daily:
+            st.warning("Weather service is temporarily unavailable. Please try again shortly.")
         else:
-            st.session_state[f"_board_cache_{selected_state}"] = board
-            log_daily_snapshot(selected_state, board)
+            dates = pd.to_datetime(daily["time"])
+            tmax = daily["temperature_2m_max"]
+            tmin = daily["temperature_2m_min"]
+            rain_prob = daily["precipitation_probability_max"]
+            codes = daily["weathercode"]
 
-        if not board.empty:
-            icon_of = lambda name: CROP_ICONS.get(name.strip().lower(), "🌱")
+            st.caption(f"📍 {geo['resolved_name']}")
+            cols = st.columns(len(dates))
+            for i, col in enumerate(cols):
+                with col:
+                    st.markdown(f"""
+                    <div class="agx-card" style="text-align:center; padding:12px;">
+                        <div style="font-size:12px; color:#777;">{dates[i].strftime('%a')}</div>
+                        <div style="font-size:22px;">{icon_for_code(codes[i])}</div>
+                        <div style="font-size:13px; font-weight:700;">{tmax[i]:.0f}° / {tmin[i]:.0f}°C</div>
+                        <div style="font-size:11px; color:#2E7D32;">{rain_prob[i]}% rain</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
             st.write("")
-            st.caption(f"🟢 {len(board)} crops trading in {selected_state} today · tap a row to open its chart")
-
-            display_df = board.copy()
-            display_df.insert(0, "", display_df["commodity"].apply(icon_of))
-            display_df = display_df.rename(columns={
-                "commodity": "Crop", "avg_modal": "Avg Price (₹/quintal)",
-                "min_price": "Low", "max_price": "High", "markets": "Markets",
-            })
-            display_df["Avg Price (₹/quintal)"] = display_df["Avg Price (₹/quintal)"].round(0)
-
-            selected_row = None
-            try:
-                event = st.dataframe(
-                    display_df, use_container_width=True, hide_index=True,
-                    on_select="rerun", selection_mode="single-row", key="price_board_table",
-                )
-                rows = event.selection.rows if event and event.selection else []
-                if rows:
-                    selected_row = board.iloc[rows[0]]["commodity"]
-            except TypeError:
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-            if selected_row:
-                st.session_state["_selected_commodity"] = selected_row
-
-            crop_names = board["commodity"].tolist()
-            current = st.session_state.get("_selected_commodity")
-            default_idx = crop_names.index(current) + 1 if current in crop_names else 0
-            picked = st.selectbox(
-                "Or choose a crop to view", ["— select —"] + crop_names,
-                index=default_idx, key="crop_picker",
-            )
-            if picked != "— select —":
-                st.session_state["_selected_commodity"] = picked
-
-            focus = st.session_state.get("_selected_commodity")
-
-            if focus:
-                row = board[board["commodity"] == focus].iloc[0]
-                st.write("")
-                st.markdown(f"### {icon_of(focus)} {focus}")
-
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Avg modal price", f"₹{row['avg_modal']:,.0f}/quintal")
-                m2.metric("Lowest reported", f"₹{row['min_price']:,.0f}")
-                m3.metric("Highest reported", f"₹{row['max_price']:,.0f}")
-                m4.metric("Markets reporting", f"{int(row['markets'])}")
-
-                crop_df = raw_df[raw_df["commodity"] == focus]
-                if "market" in crop_df.columns and not crop_df.empty:
-                    by_market = crop_df.groupby("market", as_index=False)["modal_price"].mean().sort_values("modal_price")
-                    st.caption("Today's price across markets")
-                    st.bar_chart(by_market.set_index("market")["modal_price"])
-
-                hist = get_commodity_history(selected_state, focus)
-                st.caption("Price trend (built from this app's own daily visits — the source data is a same-day snapshot with no built-in history)")
-                if len(hist) >= 2:
-                    forecast_vals = naive_forecast(hist, days_ahead=3)
-                    chart_df = hist[["date", "avg_modal"]].rename(columns={"avg_modal": "Recorded"}).set_index("date")
-                    if forecast_vals is not None:
-                        last_date = pd.to_datetime(hist["date"].iloc[-1])
-                        future_dates = [(last_date + pd.Timedelta(days=i+1)).strftime("%Y-%m-%d") for i in range(len(forecast_vals))]
-                        proj_df = pd.DataFrame({"date": future_dates, "Projected": forecast_vals}).set_index("date")
-                        combo = pd.concat([chart_df, proj_df], axis=0).sort_index()
-                        st.line_chart(combo)
-                        st.caption(f"Projected next price (naive trend, {len(hist)} day(s) of history so far): ₹{forecast_vals[0]:,.0f}/quintal. Treat as a rough direction, not a guarantee.")
-                    else:
-                        st.line_chart(chart_df)
-                else:
-                    st.info("Only today's price is logged so far for this crop — come back on a future day to start seeing a trend and projection build up.")
-
-        st.caption("Source: data.gov.in (Agmarknet), daily arrivals snapshot.")
-
-# ---------------- TAB 5: WEATHER INTELLIGENCE (DEMO) ----------------
-with tabs[4]:
-    st.markdown('#### Weather Intelligence <span class="agx-badge badge-demo">DEMO</span>', unsafe_allow_html=True)
-    st.caption(f"Forecast for {location}, combined with your farm activity to give a decision — not just a number.")
-    rng = np.random.default_rng(7)
-    days7 = pd.date_range(start=datetime.today(), periods=7)
-    rain_prob = rng.integers(5, 95, 7)
-    temps = rng.integers(22, 36, 7)
-
-    cols = st.columns(7)
-    for i, col in enumerate(cols):
-        with col:
-            st.markdown(f"""
-            <div class="agx-card" style="text-align:center; padding:12px;">
-                <div style="font-size:12px; color:#777;">{days7[i].strftime('%a')}</div>
-                <div style="font-size:22px;">{'🌧️' if rain_prob[i]>55 else '⛅' if rain_prob[i]>25 else '☀️'}</div>
-                <div style="font-size:13px; font-weight:700;">{temps[i]}°C</div>
-                <div style="font-size:11px; color:#2E7D32;">{rain_prob[i]}% rain</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    st.write("")
-    high_rain_days = [days7[i].strftime('%A') for i in range(7) if rain_prob[i] > 55]
-    if high_rain_days:
-        st.warning(f"⚠️ High rain probability on **{', '.join(high_rain_days)}** — consider postponing spraying or fertilizer application on those days.")
-    else:
-        st.success("✅ No high-rain days in the next 7 days — a good window for spraying or harvest activity.")
+            high_rain_days = [dates[i].strftime('%A') for i in range(len(dates)) if rain_prob[i] and rain_prob[i] > 55]
+            if high_rain_days:
+                st.warning(f"⚠️ High rain probability on **{', '.join(high_rain_days)}** — consider postponing spraying or fertilizer application on those days.")
+            else:
+                st.success("✅ No high-rain days in the next 7 days — a good window for spraying or harvest activity.")
+            st.caption("Source: Open-Meteo.")
 
 # ---------------- TAB 6: SOIL ANALYSIS (DEMO) ----------------
 with tabs[5]:
@@ -720,4 +713,4 @@ with tabs[7]:
 
 st.write("")
 st.divider()
-st.caption("AGRINEX AI — prototype. Crop Recommendation, Disease Detection & Price Forecast tabs use real live data/models when their files/keys are present; other tabs are illustrative UI for the full planned system.")
+st.caption("AGRINEX AI — prototype. Crop Recommendation, Disease Detection, Price Forecast & Weather tabs use real live data/models; other tabs are illustrative UI for the full planned system.")

@@ -1,448 +1,117 @@
-# AGRINEX AI
+# 🌾 AGRINEX AI
 
-AGRINEX AI is an intelligent agriculture platform designed to help farmers make better farming decisions using Machine Learning, Retrieval-Augmented Generation (RAG), Large Language Models, and Agentic AI.
+AGRINEX AI is an intelligent agriculture platform built to help Indian farmers make better decisions — combining trained ML models, a RAG-based advisory agent, live government/weather data, and a multi-agent architecture, all wrapped in a Streamlit app with production-grade CI/CD around it.
 
-The current prototype focuses on AI-powered crop recommendation and an agriculture-focused RAG chatbot, while the overall architecture is designed to expand into a complete smart agriculture ecosystem.
+Live app: *(add your Streamlit Cloud URL here)*
 
-## Current Implementation
+---
 
-### 1. AI-Based Crop Recommendation
+## ✅ What's actually live right now
 
-The current application includes a trained Machine Learning model for crop recommendation.
+| Module | Status | How it works |
+|---|---|---|
+| 🌱 **Crop Recommendation** | 🟢 LIVE | Random Forest model trained on N-P-K, temperature, humidity, pH, rainfall → predicts best-fit crop across 22 classes, with confidence scores and top-3 alternatives. |
+| 🤖 **Crop Advisor Agent (RAG)** | 🟢 LIVE | Sits on top of the ML model — retrieves regional crop-calendar knowledge (TF-IDF over a curated knowledge base) and uses Groq (Llama 3.1) to explain *why* a crop fits, and flags regionally-common crops the ML model wasn't even trained on. |
+| 🍃 **Disease Detection** | 🟢 LIVE | MobileNetV2 CNN, transfer-learned on the PlantVillage dataset (15 classes across Tomato, Potato, Pepper), with OpenCV preprocessing on uploaded leaf photos. Returns disease, confidence, severity, and a treatment action. |
+| ☁️ **Weather Intelligence** | 🟢 LIVE | Real 7-day forecast via Open-Meteo (free, no API key, globally reliable) geocoded from the farmer's own location — temperature, rain probability, and a plain-language spraying/harvest recommendation. |
+| 💰 **Market Price Board** | 🟢 LIVE (with graceful fallback) | Pulls today's mandi arrivals from data.gov.in (Agmarknet) for any Indian state, shows a sortable price board across every crop trading that day, drill-down per-crop chart across markets, and a locally-built day-over-day price trend + naive projection that improves the longer the app is used. Falls back to the last known snapshot if the live government API is slow (a known characteristic of this particular dataset). |
+| 💬 **Farmer Assistant Chatbot** | 🟢 LIVE | Groq-powered (Llama 3.1) multilingual chat (Marathi / Hindi / English) with reply-to-message threading, scoped to farming topics. |
+| 🎭 **Multi-Agent Orchestrator** | 🟢 BUILT | Intent-classification layer that routes a farmer's question to a specialized sub-agent (crop advice / disease / market / general) instead of one giant prompt trying to do everything — see `agents/orchestrator.py`. |
+| 🔌 **MCP Server** | 🟢 BUILT | Exposes mandi price lookup, crop-calendar retrieval, and soil analysis as standard MCP tools (`mcp/agrinex_mcp_server.py`), so any MCP-compatible agent can call AGRINEX's data sources directly. |
+| 🧪 **CI/CD Pipeline** | 🟢 LIVE | GitHub Actions: lint (ruff) + unit tests + coverage on every push; a scheduled/manual RAG-evaluation pipeline scoring the advisor agent on faithfulness, relevancy, and context precision against a golden Q&A set; Docker build + smoke test on merge to `main`. |
+| 📊 **RAG Evaluation Harness** | 🟢 BUILT | `eval/run_rag_eval.py` — LLM-as-judge scoring of the Crop Advisor Agent against 5 hand-written farmer scenarios, gating CI if quality regresses. |
+| 🐳 **Containerization** | 🟢 BUILT | `Dockerfile` + `docker-compose.yml` (app + Redis cache + ChromaDB, for future vector search). |
+| 🧊 **Caching layer** | 🟢 BUILT | Redis-backed memoization (`cache_utils.py`) ready to wrap expensive LLM calls. |
 
-The model takes agricultural and environmental parameters such as:
+---
 
-- Nitrogen (N)
-- Phosphorus (P)
-- Potassium (K)
-- Temperature
-- Humidity
-- Soil pH
-- Rainfall
+## 🟡 Demo / illustrative UI (not yet wired to real data or models)
 
-Based on these inputs, the model predicts the most suitable crop.
+| Module | Status | Notes |
+|---|---|---|
+| 📈 **Yield Prediction** | 🟡 Demo | Rule-based multiplier math on user-entered inputs — no trained yield model yet. |
+| 🧪 **Soil Analysis** | 🟡 Demo | Rule-based thresholds on manually entered pH/N/organic carbon — no OCR on uploaded soil reports yet, no real lab-report parsing. |
+| 🛒 **Marketplace** (crop listings + farm labour) | 🟡 Demo | UI only — no persistent storage, no real buyer/worker matching yet. |
 
-The current model supports 22 crop classes:
+## 🔴 Planned, not started
 
-```text
-Apple
-Banana
-Blackgram
-Chickpea
-Coconut
-Coffee
-Cotton
-Grapes
-Jute
-Kidneybeans
-Lentil
-Maize
-Mango
-Mothbeans
-Mungbean
-Muskmelon
-Orange
-Papaya
-Pigeonpeas
-Pomegranate
-Rice
-Watermelon
-```
+Drone analysis · Satellite monitoring · IoT sensor integration · Equipment rental · Agricultural input marketplace · Voice-based interaction · Farm analytics dashboard · AI risk analysis (combined disease/weather/market risk score) · Personalized farmer profile persistence across sessions.
 
-The trained model is integrated into the Streamlit application so that users can provide soil and environmental values and receive a crop recommendation.
+---
 
-### 2. RAG-Based Agriculture Chatbot
-
-AGRINEX AI includes an agriculture-focused chatbot based on Retrieval-Augmented Generation (RAG).
-
-Instead of depending only on the language model's internal knowledge, the chatbot retrieves relevant information from the configured agricultural knowledge base and uses that information to generate the response.
-
-The basic flow is:
-
-```text
-User Question
-      ↓
-Query Processing
-      ↓
-Relevant Knowledge Retrieval
-      ↓
-Context
-      ↓
-LLM
-      ↓
-Agriculture-Focused Response
-```
-
-This allows the chatbot to answer agriculture-related questions using retrieved contextual information.
-
-### 3. Crop Recommendation with RAG
-
-The crop recommendation functionality and the RAG-based assistant are designed to work together.
-
-The Machine Learning model provides the crop prediction, while the RAG system can provide additional agricultural context and explanation around the recommendation.
-
-Conceptually:
-
-```text
-Farmer Input
-     ↓
-Crop Recommendation Model
-     ↓
-Predicted Crop
-     ↓
-RAG Knowledge Retrieval
-     ↓
-Agricultural Context
-     ↓
-AI Explanation / Guidance
-```
-
-This makes the system more useful than providing only a crop name.
-
-### 4. Agentic AI Architecture
-
-AGRINEX AI is also designed around an Agentic AI approach.
-
-The objective is to move from a simple question-answer system toward an AI system that can understand the farmer's requirement, decide which capability is required, retrieve relevant information, use available models/tools, and generate a final response.
-
-The conceptual workflow is:
-
-```text
-Farmer Query
-     ↓
-AI Agent
-     ↓
-Understand Intent
-     ↓
-Select Required Tool / Knowledge
-     ↓
-Retrieve Data or Run Model
-     ↓
-Analyze Result
-     ↓
-Generate Final Response
-```
-
-The Agentic AI layer is intended to act as the orchestration layer between the farmer and different agriculture intelligence components.
-
-## Current Technology Direction
-
-The current prototype is built around:
-
-- Python
-- Streamlit
-- Machine Learning
-- RAG
-- LLM
-- Agentic AI concepts
-- Agricultural datasets
-- Trained crop recommendation model
-
-The application is designed to be extended with additional AI models and external data sources through APIs.
-
-# Planned Future Modules
-
-AGRINEX AI is being developed toward a complete smart agriculture ecosystem. The following modules represent the planned expansion of the platform.
-
-## 5. Crop Disease Detection
-
-A future Computer Vision module will allow farmers to upload crop or leaf images.
-
-The system will analyze the image and identify supported crop diseases using a trained Deep Learning model.
-
-```text
-Crop Image
-    ↓
-Image Processing
-    ↓
-Disease Detection Model
-    ↓
-Disease Prediction
-    ↓
-AI Guidance
-```
-
-## 6. Soil Intelligence
-
-The future system will analyze soil parameters and soil reports to provide:
-
-- Soil health analysis
-- Nutrient deficiency detection
-- Crop suitability
-- Fertilizer planning
-- Soil improvement recommendations
-
-## 7. Weather Intelligence
-
-The platform will integrate weather information and convert weather conditions into agriculture-specific recommendations.
-
-It can eventually consider:
-
-- Temperature
-- Humidity
-- Rainfall
-- Wind
-- Forecast information
-- Historical weather
-- Farm location
-
-The objective is not only to show weather but to explain how weather conditions may affect farming activities.
-
-## 8. Yield Prediction
-
-A future ML model will estimate expected crop yield using factors such as:
-
-- Crop type
-- Farm area
-- Soil conditions
-- Weather
-- Irrigation
-- Fertilizer usage
-- Historical yield
-- Crop growth information
-
-The estimated yield can later be used for revenue and profitability analysis.
-
-## 9. Market Price Prediction
-
-AGRINEX AI will eventually include agricultural market intelligence.
-
-Historical market data can be used to analyze:
-
-- Crop prices
-- Market trends
-- Market arrivals
-- Seasonal patterns
-- Demand and supply indicators
-
-A suitable ML or time-series model can be used to estimate future price trends.
-
-## 10. Farmer-to-Buyer Marketplace
-
-A planned marketplace will allow farmers to list their agricultural produce.
-
-Farmers can provide:
-
-- Crop
-- Quantity
-- Quality
-- Expected harvest date
-- Expected price
-- Location
-
-Buyers can discover available produce and directly connect with farmers.
-
-## 11. Agricultural Input Marketplace
-
-The future platform can connect farmers with suppliers of:
-
-- Seeds
-- Fertilizers
-- Crop protection products
-- Farming equipment
-- Agricultural tools
-
-Price and availability comparison can help farmers make better purchasing decisions.
-
-## 12. Agricultural Labour Marketplace
-
-Farmers will be able to post temporary agricultural jobs.
-
-Workers can:
-
-- Create profiles
-- Search for farm jobs
-- Apply for work
-- Accept assignments
-- Track completed work
-- Receive payments
-
-This creates a direct connection between farmers and agricultural workers.
-
-## 13. Equipment Rental
-
-The platform can later support rental services for:
-
-- Tractors
-- Harvesting equipment
-- Sprayers
-- Rotavators
-- Agricultural drones
-- Other farm machinery
-
-## 14. IoT Integration
-
-Future versions can connect field sensors for real-time monitoring.
-
-Possible sensor data includes:
-
-- Soil moisture
-- Temperature
-- Humidity
-- pH
-- EC
-- Water level
-
-```text
-IoT Sensors
-     ↓
-Data Collection
-     ↓
-AGRINEX Backend
-     ↓
-AI Analysis
-     ↓
-Farmer Recommendation
-```
-
-## 15. Drone Analysis
-
-Drone imagery can eventually be analyzed using Computer Vision for:
-
-- Crop health
-- Plant counting
-- Disease/stress detection
-- Weed detection
-- Field monitoring
-- Yield estimation
-
-## 16. Satellite-Based Farm Monitoring
-
-Satellite data can be integrated for:
-
-- Crop monitoring
-- Vegetation analysis
-- Water stress
-- Drought monitoring
-- Flood impact
-- Large-scale farm analysis
-
-## 17. Personalized Farmer Profile
-
-Each farmer will have a unique digital profile containing relevant farm information.
-
-```text
-Farmer ID
-   ├── Farm Information
-   ├── Soil Data
-   ├── Crop History
-   ├── Yield History
-   ├── Disease History
-   ├── Weather Data
-   ├── Sales
-   └── AI Recommendations
-```
-
-This information can eventually allow AGRINEX AI to provide more personalized recommendations.
-
-## 18. Farm Analytics
-
-A future dashboard will combine agricultural information into a single view.
-
-Possible analytics include:
-
-- Crop health
-- Soil condition
-- Expected yield
-- Market price
-- Revenue
-- Expenses
-- Profit
-- Weather
-- Farming activities
-
-## 19. AI Risk Analysis
-
-The future system can combine different signals to estimate:
-
-- Disease risk
-- Weather risk
-- Water risk
-- Yield risk
-- Market risk
-
-This can provide farmers with an overall understanding of potential farming risks.
-
-## 20. Multilingual and Voice-Based Interaction
-
-The platform is designed to support regional languages and voice-based interaction so that farmers can communicate with the system more naturally.
-
-Potential support includes:
-
-- English
-- Hindi
-- Marathi
-- Other regional languages
-
-# Overall Architecture
-
-The long-term AGRINEX AI architecture is designed as:
+## Architecture
 
 ```text
                          AGRINEX AI
                               |
-                        Farmer Interface
+                    Streamlit Farmer Interface
                               |
-                        AI Agent Layer
+                    Multi-Agent Orchestrator  ──── MCP Server (mandi/soil/calendar tools)
                               |
-             +----------------+----------------+
-             |                |                |
-             ↓                ↓                ↓
-       Crop ML Model      RAG System       Future AI Models
-             |                |                |
-             ↓                ↓                ↓
-      Crop Prediction    Knowledge       Disease / Soil /
-                         Retrieval       Weather / Yield /
-                                         Price Models
-             \                |                /
-              \               |               /
-               +--------------+---------------+
+        +---------------------+----------------------+
+        |                     |                       |
+        ↓                     ↓                       ↓
+  Crop ML Model      Crop Advisor Agent (RAG)    Disease CNN Model
+  (Random Forest)     (TF-IDF + Groq/Llama)      (MobileNetV2 + OpenCV)
+        |                     |                       |
+        ↓                     ↓                       ↓
+  Crop Prediction    Regional Explanation      Disease + Treatment
                               |
-                       Decision Layer
-                              |
-                  Personalized Guidance
-                              |
-             +----------------+----------------+
-             |                |                |
-             ↓                ↓                ↓
-          Farmer           Marketplace      Analytics
-             |                |                |
-             ↓                ↓                ↓
-          Farming       Buyers/Suppliers     Insights
+                    +----------------------+
+                    |                      |
+                    ↓                      ↓
+            Live Weather (Open-Meteo)   Live Mandi Prices (Agmarknet)
 ```
 
-# Development Philosophy
+## Tech stack
 
-AGRINEX AI follows a modular approach.
+Python · Streamlit · scikit-learn · TensorFlow/Keras · OpenCV · Groq (Llama 3.1) · TF-IDF RAG · Open-Meteo · data.gov.in (Agmarknet) · GitHub Actions · Docker · Redis · ChromaDB · MCP
 
-Instead of building one large model for every agricultural task, individual AI/ML components can be developed and trained for specific problems and then connected through the Agentic AI and backend layers.
+## Repo layout
 
-The development pipeline is:
-
-```text
-Agricultural Data
-       ↓
-Data Cleaning
-       ↓
-Preprocessing
-       ↓
-Model Training
-       ↓
-Evaluation
-       ↓
-Model Deployment
-       ↓
-API / Application Integration
-       ↓
-Real-World Prediction
-       ↓
-Verified Feedback
-       ↓
-Future Model Improvement
+```
+app.py                     Main Streamlit app (all 8 tabs)
+crop_agent.py               RAG-based Crop Advisor Agent
+mandi_data.py                Live mandi price fetching + local history/trend
+weather_utils.py             Open-Meteo live weather
+image_utils.py                Testable disease-detection preprocessing
+cache_utils.py                 Redis memoization helper
+agents/orchestrator.py          Multi-agent intent router
+mcp/agrinex_mcp_server.py        MCP tool server
+eval/                              RAG evaluation harness + golden Q&A set
+tests/                              Unit tests
+scripts/fetch_mandi_snapshot.py     Manual mandi data refresh script
+.github/workflows/                   CI, RAG-eval, deploy pipelines
+Dockerfile / docker-compose.yml        Containerized full stack
 ```
 
-# Vision
+## Running locally
 
-The ultimate goal of AGRINEX AI is to build a unified intelligent agriculture platform where a farmer can access crop recommendation, agricultural knowledge, disease detection, soil intelligence, weather intelligence, yield prediction, market intelligence, marketplace services, labour services, and farm analytics through a single ecosystem.
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
 
-The current implementation establishes the foundation with a trained crop recommendation model, RAG-based agricultural chatbot, crop-related RAG assistance, and an Agentic AI-oriented architecture. The remaining modules will be progressively integrated as independent AI services and connected through the common AGRINEX AI platform.
+Needs `.streamlit/secrets.toml` with:
+```toml
+GROQ_API_KEY = "..."
+DATA_GOV_API_KEY = "..."   # optional — Market Price tab falls back gracefully without it
+```
+
+## Running tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v
+ruff check .
+```
+
+---
+
+## A known limitation worth knowing about
+
+The government's mandi-price API (data.gov.in / Agmarknet) has proven unreliable to call **from cloud infrastructure** (both GitHub Actions and Streamlit Cloud observed frequent timeouts / 502s), while working fine from a residential/mobile Indian network. The app is built to degrade gracefully around this — falling back to the last successfully fetched data — rather than pretending the live call always succeeds.
+
+---
+
+*AGRINEX AI — a work in progress, built module by module.*

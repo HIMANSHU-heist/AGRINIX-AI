@@ -12,6 +12,7 @@ from mandi_data import (
     generate_price_advisory,
 )
 from weather_utils import geocode_location, fetch_7day_forecast, icon_for_code, generate_weather_advisory
+from groq import Groq    
 
 DISEASE_MODEL_PATHS = ["disease_model.keras", os.path.join("model_output", "disease_model.h5")]
 DISEASE_LABELS_PATHS = ["disease_labels.json", os.path.join("model_output", "disease_labels.json")]
@@ -146,11 +147,9 @@ except Exception as e:
     groq_init_error = str(e)
     groq_ready = False
 
-if not groq_ready:
-    st.sidebar.error(f"🔧 Groq init failed: {groq_init_error}")
 
 data_gov_key = st.secrets.get("DATA_GOV_API_KEY", None)
-st.sidebar.write("🔧 Secrets keys found:", list(st.secrets.keys()))
+
 
 # ============================================================
 # CROP ADVISOR AGENT (ML + RAG + LLM) — cached so the TF-IDF

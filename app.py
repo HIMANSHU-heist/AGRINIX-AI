@@ -135,16 +135,19 @@ if os.path.exists(MODEL_PATH) and os.path.exists(LABELS_PATH):
 # GROQ CLIENT (shared) — used by Tab 1 crop-agent explanation
 # and Tab 7 farmer assistant chat
 # ============================================================
-from groq import Groq
-
 groq_client = None
 groq_ready = False
+groq_init_error = None
 try:
     groq_key = st.secrets["GROQ_API_KEY"]
     groq_client = Groq(api_key=groq_key)
     groq_ready = True
-except Exception:
+except Exception as e:
+    groq_init_error = str(e)
     groq_ready = False
+
+if not groq_ready:
+    st.sidebar.error(f"🔧 Groq init failed: {groq_init_error}")
 
 data_gov_key = st.secrets.get("DATA_GOV_API_KEY", None)
 st.sidebar.write("🔧 Secrets keys found:", list(st.secrets.keys()))

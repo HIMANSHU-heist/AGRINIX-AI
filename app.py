@@ -17,6 +17,14 @@ from weather_utils import geocode_location, fetch_7day_forecast, icon_for_code, 
 from groq import Groq
 
 
+def show_image(img, caption=None):
+    """Works on old and new Streamlit versions."""
+    try:
+        st.image(img, caption=caption, use_container_width=True)
+    except TypeError:
+        st.image(img, caption=caption, use_column_width=True)
+
+
 # ============================================================
 # NEAT ADVISORY RENDERERS
 # ============================================================
@@ -373,7 +381,7 @@ with tabs[1]:
     if img:
         c1, c2 = st.columns([1,1])
         with c1:
-            st.image(img, caption="Uploaded image", use_container_width=True)
+            show_image(img, caption="Uploaded image")
             img.seek(0)
 
         with c2:
@@ -496,7 +504,7 @@ with tabs[3]:
             if rows:
                 selected_row = board.iloc[rows[0]]["commodity"]
         except TypeError:
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.dataframe(display_df, hide_index=True)
 
         if selected_row:
             st.session_state["_selected_commodity"] = selected_row

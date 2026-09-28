@@ -147,6 +147,7 @@ except Exception:
     groq_ready = False
 
 data_gov_key = st.secrets.get("DATA_GOV_API_KEY", None)
+st.sidebar.write("🔧 Secrets keys found:", list(st.secrets.keys()))
 
 # ============================================================
 # CROP ADVISOR AGENT (ML + RAG + LLM) — cached so the TF-IDF

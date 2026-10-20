@@ -9,5 +9,5 @@ tensorflow==2.16.1
 opencv-python-headless==4.10.0.84
 pillow==10.4.0
 requests==2.32.3
-chromadb==0.5.15
-redis==5.0.8
+pyrebase4
+firebase-admin==6.5.0

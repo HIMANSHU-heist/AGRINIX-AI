@@ -6,3 +6,14 @@ model_output/
 venv/
 __pycache__/
 *.pyc
+*-firebase-adminsdk-*.json
+service-account*.json
+.streamlit/secrets.env
+price_history/
+.env
+*-firebase-adminsdk-*.json
+service-account*.json
+.streamlit/secrets.env
+price_history/
+.env
+.streamlit/secrets.toml

@@ -15,7 +15,7 @@ services:
       - redis
       - chromadb
     volumes:
-      - ./disease_model.h5:/app/disease_model.h5:ro
+      - ./disease_model.keras:/app/disease_model.keras:ro
       - ./crop_model.pkl:/app/crop_model.pkl:ro
     restart: unless-stopped
 

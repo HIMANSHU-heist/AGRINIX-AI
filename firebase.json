@@ -1,0 +1,10 @@
+{
+  "hosting": {
+    "site": "agrinix-ai",
+    "public": "web",
+    "ignore": [
+      "firebase.json",
+      "**/.*"
+    ]
+  }
+}

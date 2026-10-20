@@ -16,6 +16,21 @@ from mandi_data import (
 from weather_utils import geocode_location, fetch_7day_forecast, icon_for_code, generate_weather_advisory
 from groq import Groq
 
+# ---- Page config + Firebase login gate (TF model login नंतरच load होईल) ----
+st.set_page_config(
+    page_title="AGRINEX AI",
+    page_icon="🌾",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+from ui_theme import inject_css, hero, stat_row
+from auth_ui import require_login, logout_button
+from firestore_db import save_profile, safe_add_record
+
+inject_css()
+user = require_login()
+UID = user["uid"]
+
 
 def show_image(img, caption=None):
     """Works on old and new Streamlit versions."""
@@ -113,57 +128,11 @@ def predict_disease(uploaded_file):
 # ============================================================
 # PAGE CONFIG
 # ============================================================
-st.set_page_config(
-    page_title="AGRINEX AI",
-    page_icon="🌾",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # ============================================================
 # GLOBAL LIGHT-MODE STYLING
 # ============================================================
-st.markdown("""
-<style>
-    .main { background-color: #FFFFFF; }
-    .block-container { padding-top: 2rem; }
-
-    .agx-hero {
-        background: linear-gradient(135deg, #E8F5E9 0%, #F1F8F2 100%);
-        border: 1px solid #C8E6C9;
-        border-radius: 16px;
-        padding: 28px 32px;
-        margin-bottom: 24px;
-    }
-    .agx-card {
-        background: #FFFFFF;
-        border: 1px solid #E0E0E0;
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 14px;
-    }
-    .agx-result {
-        background: #E8F5E9;
-        border: 1px solid #A5D6A7;
-        border-radius: 12px;
-        padding: 24px;
-        text-align: center;
-    }
-    .agx-badge {
-        display:inline-block; font-size:11px; font-weight:700;
-        padding:3px 10px; border-radius:999px; letter-spacing:0.03em;
-    }
-    .badge-live { background:#C8E6C9; color:#1B5E20; }
-    .badge-demo { background:#FFE0B2; color:#8D5A00; }
-
-    .agx-metric { text-align:center; padding:14px; border-right:1px solid #EEE; }
-    .agx-metric:last-child { border-right:none; }
-    .agx-metric .num { font-size:26px; font-weight:800; color:#2E7D32; }
-    .agx-metric .lbl { font-size:12px; color:#777; margin-top:2px; }
-
-    section[data-testid="stSidebar"] { background-color: #F7FBF7; border-right: 1px solid #E0E0E0; }
-</style>
-""", unsafe_allow_html=True)
+# styling: see ui_theme.py
 
 # ============================================================
 # LOAD REAL MODEL (crop recommendation) — falls back to a
@@ -252,37 +221,39 @@ def rule_based_predict(n,p,k,temp,hum,ph,rain):
 # ============================================================
 # SIDEBAR — Farmer profile (feeds the whole app)
 # ============================================================
+profile = user.get("profile") or {}
+farmer_id = f"AGX-{UID[:6].upper()}"
 with st.sidebar:
-    st.markdown("### 🌾 AGRINEX AI")
-    st.caption("Farmer Digital Profile")
-    farmer_name = st.text_input("Farmer name", "Ramesh Patil")
-    farmer_id = st.text_input("Farmer ID", "AGX-10234")
-    location = st.text_input("Farm location", "Nashik, Maharashtra")
-    land_area = st.number_input("Land area (acres)", min_value=0.1, value=2.5, step=0.1)
+    st.markdown('<div class="agx-brand">🌾 AGRINEX AI</div>', unsafe_allow_html=True)
+    st.caption("शेतकरी प्रोफाइल · Farmer Profile")
+    farmer_name = st.text_input("Farmer name", profile.get("name") or user.get("name") or "")
+    st.text_input("Farmer ID", farmer_id, disabled=True)
+    location = st.text_input("Farm location", profile.get("location") or "Nashik, Maharashtra")
+    land_area = st.number_input("Land area (acres)", min_value=0.1, value=float(profile.get("land_area", 2.5)), step=0.1)
+    if st.button("💾 Save profile", use_container_width=True):
+        new_profile = {"name": farmer_name, "location": location, "land_area": float(land_area)}
+        try:
+            save_profile(UID, new_profile)
+            st.session_state["user"]["profile"] = {**profile, **new_profile}
+            st.toast("Profile saved ✅")
+        except Exception as e:
+            st.error(f"Save झालं नाही: {e}")
     st.divider()
-    st.caption(f"Model status: {'🟢 Live model loaded' if model_is_real else '🟡 Demo mode (add crop_model.pkl + crop_labels.json to this folder for the real model)'}")
-    st.divider()
-    st.caption("AGRINEX AI — prototype build")
+    st.caption(f"Crop model: {'🟢 live' if model_is_real else '🟡 demo'} · Disease model: {'🟢 live' if disease_model_is_real else '🟡 demo'}")
+    logout_button()
+    st.caption(user["email"])
 
 # ============================================================
 # HERO
 # ============================================================
-st.markdown(f"""
-<div class="agx-hero">
-    <h1 style="margin:0; color:#1B5E20;">🌾 AGRINEX AI</h1>
-    <p style="margin:6px 0 0 0; color:#33512E; font-size:16px;">
-    Namaskar, <b>{farmer_name}</b> — {location} | {land_area} acres | ID: {farmer_id}
-    </p>
-</div>
-""", unsafe_allow_html=True)
+hero(farmer_name, location, land_area, farmer_id)
 
-c1,c2,c3,c4 = st.columns(4)
-for col, num, lbl in [
-    (c1,"9","AI systems"), (c2,"22","Crops supported"),
-    (c3,"7","Live soil/climate inputs"), (c4,"3","Languages supported")
-]:
-    with col:
-        st.markdown(f'<div class="agx-metric"><div class="num">{num}</div><div class="lbl">{lbl}</div></div>', unsafe_allow_html=True)
+stat_row([
+    ("9", "AI systems", "🤖"),
+    ("22", "Crops supported", "🌾"),
+    ("7", "Soil & climate inputs", "🧪"),
+    ("3", "Languages", "🗣️"),
+])
 
 st.write("")
 
@@ -292,7 +263,7 @@ st.write("")
 tabs = st.tabs([
     "🌱 Crop Recommendation", "🍃 Disease Detection", "📈 Yield Prediction",
     "💰 Price Forecast", "☁️ Weather", "🧪 Soil Analysis",
-    "💬 Farmer Assistant", "🛒 Marketplace"
+    "💬 Farmer Assistant", "🛒 Marketplace", "📜 My History"
 ])
 
 # ---------------- TAB 1: CROP RECOMMENDATION (REAL MODEL) ----------------
@@ -330,6 +301,11 @@ with tabs[0]:
                 top3 = [(c, s*100) for c,s in scored[:3]]
 
             icon = CROP_ICONS.get(pred, "🌱")
+            safe_add_record(UID, "crop_queries", {
+                "crop": str(pred), "confidence": float(conf), "season": season, "location": location,
+                "top3": [{"crop": str(c), "score": round(float(sc_), 1)} for c, sc_ in top3],
+                "inputs": {"N": n, "P": p, "K": k, "temperature": temp, "humidity": hum, "ph": ph, "rainfall": rain},
+            })
             st.markdown(f"""
             <div class="agx-result">
                 <div style="font-size:40px;">{icon}</div>
@@ -388,6 +364,13 @@ with tabs[1]:
             if disease_model_is_real:
                 with st.spinner("Analyzing leaf image..."):
                     label, conf, info = predict_disease(img)
+                _sig = (img.name, img.size)
+                if st.session_state.get("_disease_saved") != _sig:
+                    st.session_state["_disease_saved"] = _sig
+                    safe_add_record(UID, "disease_checks", {
+                        "label": label, "confidence": float(conf),
+                        "severity": info["severity"], "action": info["action"],
+                    })
                 disease_display = label.replace("_", " ")
                 st.markdown(f"""
                 <div class="agx-result">
@@ -768,6 +751,7 @@ Farming, crops, disease, soil, weather, market price संबंधित प�
         answer = response.choices[0].message.content
         assistant_msg = {"id": str(uuid.uuid4()), "role":"assistant", "text": answer, "reply_to": None}
         st.session_state.chat.append(assistant_msg)
+        safe_add_record(UID, "chat_history", {"question": user_q, "answer": answer, "lang": lang})
         st.rerun()
 
 # ---------------- TAB 8: MARKETPLACE (DEMO) ----------------
@@ -787,6 +771,10 @@ with tabs[7]:
         with cc3:
             list_quality = st.selectbox("Quality grade", ["A - Premium","B - Standard","C - Basic"])
         if st.button("📋 Create listing"):
+            safe_add_record(UID, "listings", {
+                "crop": list_crop, "qty": int(list_qty), "price_per_kg": int(list_price),
+                "harvest_date": list_harvest.isoformat(), "quality": list_quality, "location": location,
+            })
             st.success(f"Listed: {list_qty} kg of {list_crop} at ₹{list_price}/kg, grade {list_quality}, ready {list_harvest.strftime('%d %b %Y')}. Buyers near {location} will see this listing.")
 
     with m2:
@@ -799,7 +787,69 @@ with tabs[7]:
             days_needed = st.number_input("Duration (days)", 1, 60, 2)
             wage = st.number_input("Wage per worker/day (₹)", 100, 2000, 400)
         if st.button("📋 Post job"):
+            safe_add_record(UID, "labour_jobs", {
+                "job_type": job_type, "workers": int(workers), "days": int(days_needed),
+                "wage_per_day": int(wage), "location": location,
+            })
             st.success(f"Job posted: {workers} workers for {job_type}, {days_needed} day(s), ₹{wage}/day at {location}.")
+
+# ---------------- TAB 9: MY HISTORY (Firestore) ----------------
+with tabs[8]:
+    st.markdown('#### My History <span class="agx-badge badge-live">SAVED</span>', unsafe_allow_html=True)
+    st.caption("तुमचे crop सल्ले, रोग-तपासण्या, chat, listings आणि jobs: तुमच्या account मध्ये सुरक्षित.")
+
+    @st.cache_data(ttl=60, show_spinner=False)
+    def _load_history(uid, collection):
+        from firestore_db import list_records
+        return list_records(uid, collection, limit=30)
+
+    def _fmt(v):
+        if isinstance(v, dict):
+            return ", ".join(f"{a}: {b}" for a, b in v.items())
+        if isinstance(v, list):
+            return " | ".join(_fmt(x) for x in v)
+        return str(v)
+
+    kinds = {
+        "🌱 Crop advice": "crop_queries",
+        "🍃 Disease checks": "disease_checks",
+        "💬 Chats": "chat_history",
+        "🛒 Listings": "listings",
+        "🧑‍🌾 Jobs": "labour_jobs",
+    }
+    heads = {
+        "crop_queries": lambda r: f"{CROP_ICONS.get(r.get('crop'), '🌱')} {str(r.get('crop', '')).title()} ({r.get('confidence', 0):.0f}%)",
+        "disease_checks": lambda r: "🍃 " + str(r.get("label", "")).replace("_", " "),
+        "chat_history": lambda r: "💬 " + str(r.get("question", ""))[:60],
+        "listings": lambda r: f"🌾 {r.get('crop', '')} · {r.get('qty', '')} kg",
+        "labour_jobs": lambda r: f"🧑‍🌾 {r.get('job_type', '')} · {r.get('workers', '')} workers",
+    }
+
+    hc1, hc2 = st.columns([4, 1])
+    with hc1:
+        kind = st.radio("Show", list(kinds.keys()), horizontal=True, label_visibility="collapsed")
+    with hc2:
+        if st.button("🔄 Refresh", use_container_width=True):
+            _load_history.clear()
+            st.rerun()
+
+    coll = kinds[kind]
+    try:
+        rows = _load_history(UID, coll)
+    except Exception as e:
+        rows = []
+        st.warning(f"History load झाली नाही: {e}")
+
+    if not rows:
+        st.info("अजून काही save झालेलं नाही. कोणताही सल्ला/तपासणी केलीस की इथे दिसेल.")
+    for r in rows:
+        ts = r.get("created_at")
+        when = ts.strftime("%d %b %Y, %I:%M %p") if ts else ""
+        with st.expander(f"{heads[coll](r)}  ·  {when}"):
+            for key, val in r.items():
+                if key in ("id", "created_at"):
+                    continue
+                st.markdown(f"**{key.replace('_', ' ').title()}:** {_fmt(val)}")
 
 st.write("")
 st.divider()
